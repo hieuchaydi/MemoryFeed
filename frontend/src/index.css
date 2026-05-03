@@ -37,25 +37,13 @@ body {
   height: 100vh;
 }
 
-.brand { display: flex; gap: 14px; align-items: center; margin-bottom: 26px; }
-.sig {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background: #0b1523;
-}
-.logo-mark {
-  width: 34px;
-  height: 34px;
-  object-fit: contain;
+.brand { margin-bottom: 26px; }
+.logo-wordmark {
+  width: 100%;
+  max-width: 246px;
+  height: auto;
   display: block;
 }
-.brand h3 { margin: 0; }
-.brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 
 .tabs { display: grid; gap: 8px; }
 .tab {
