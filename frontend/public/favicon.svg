@@ -1,19 +1,57 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#F2FCFF"/>
-      <stop offset="1" stop-color="#DCFFF1"/>
+    <linearGradient id="topFill" x1="512" y1="305" x2="512" y2="535" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EEF8FF"/>
+      <stop offset="1" stop-color="#DCEAF3"/>
     </linearGradient>
-    <linearGradient id="m" x1="14" y1="18" x2="50" y2="46" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2BAAFF"/>
-      <stop offset="1" stop-color="#16C89B"/>
+
+    <linearGradient id="orangeLayer" x1="230" y1="550" x2="794" y2="550" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F79B55"/>
+      <stop offset="1" stop-color="#C9793B"/>
     </linearGradient>
+
+    <linearGradient id="coralLayer" x1="230" y1="635" x2="794" y2="635" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF8A72"/>
+      <stop offset="1" stop-color="#F05D4E"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="160" y="250" width="700" height="520" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#163246" flood-opacity="0.18"/>
+    </filter>
   </defs>
-  <rect x="3.5" y="3.5" width="57" height="57" rx="15" fill="url(#bg)" stroke="#9CE3FF"/>
-  <path d="M14 44V20L23 33L32 23L41 33L50 20V44" stroke="url(#m)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="14" cy="20" r="2.2" fill="#2BAAFF"/>
-  <circle cx="23" cy="33" r="2.2" fill="#4DBDFF"/>
-  <circle cx="32" cy="23" r="2.2" fill="#66CEFF"/>
-  <circle cx="41" cy="33" r="2.2" fill="#30D9B0"/>
-  <circle cx="50" cy="20" r="2.2" fill="#16C89B"/>
+
+  <rect width="1024" height="1024" fill="white"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M292 410 C350 370, 420 370, 475 410" stroke="#16C89B" stroke-width="10" stroke-linecap="round" stroke-dasharray="2 34"/>
+    <path d="M548 408 C615 365, 690 370, 750 410" stroke="#16C89B" stroke-width="10" stroke-linecap="round" stroke-dasharray="2 34"/>
+
+    <path d="M512 310 L824 438 L512 566 L200 438 Z" fill="#2A465D"/>
+    <path d="M512 335 L785 438 L512 541 L239 438 Z" fill="#F7FBFF"/>
+    <path d="M512 350 L755 438 L512 526 L269 438 Z" fill="url(#topFill)"/>
+    <path d="M269 438 L512 526 L755 438" stroke="#B7C7D4" stroke-width="10" stroke-linejoin="round"/>
+
+    <circle cx="390" cy="437" r="13" fill="#16C89B"/>
+    <circle cx="512" cy="394" r="13" fill="#16C89B"/>
+    <circle cx="634" cy="437" r="13" fill="#16C89B"/>
+    <path d="M390 437 L512 394 L634 437" stroke="#16C89B" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M200 512 L512 640 L824 512" stroke="#2A465D" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M200 536 L512 664 L824 536 L824 590 L512 718 L200 590 Z" fill="#2A465D"/>
+    <path d="M238 542 L512 646 L786 542 L512 615 Z" fill="url(#orangeLayer)"/>
+    <path d="M238 582 L512 686 L786 582" stroke="#D98243" stroke-width="14" stroke-linejoin="round"/>
+
+    <path d="M200 592 L512 720 L824 592 L824 642 L512 770 L200 642 Z" fill="#2A465D"/>
+    <path d="M238 604 L512 706 L786 604 L786 624 L512 728 L238 624 Z" fill="url(#coralLayer)"/>
+    <path d="M238 632 L512 734 L786 632" stroke="#FF725F" stroke-width="12" stroke-linejoin="round"/>
+
+    <path d="M200 642 L512 770 L824 642" stroke="#2A465D" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <circle cx="280" cy="580" r="10" fill="#FFD166"/>
+    <circle cx="512" cy="690" r="10" fill="#FFD166"/>
+    <circle cx="744" cy="580" r="10" fill="#FFD166"/>
+
+    <path d="M280 580 L512 690 L744 580" stroke="#FFD166" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="14 18"/>
+  </g>
 </svg>
