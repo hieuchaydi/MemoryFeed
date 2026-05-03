@@ -1,6 +1,12 @@
-﻿import { NavLink, Outlet } from "react-router-dom";
+import type { ReactNode } from "react";
+import { NavLink, Outlet } from "react-router-dom";
 
-function Tab({ to, children }) {
+interface TabProps {
+  to: string;
+  children: ReactNode;
+}
+
+function Tab({ to, children }: TabProps) {
   return (
     <NavLink to={to} className={({ isActive }) => `tab ${isActive ? "active" : ""}`}>
       {children}

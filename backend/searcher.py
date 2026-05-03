@@ -26,6 +26,7 @@ class Searcher:
         fts_ids = [item["id"] for item in fts_hits]
         sem_ids = [item.id for item in sem_hits]
         score_map = rrf_fuse_fast(fts_ids, sem_ids, k=60)
+        all_ids = list(dict.fromkeys([*fts_ids, *sem_ids]))
 
         items_by_id = await asyncio.to_thread(self.store.get_items_by_ids, all_ids)
 

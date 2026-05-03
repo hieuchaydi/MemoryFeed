@@ -1,8 +1,15 @@
 import { ExternalLink } from "lucide-react";
-import PlatformBadge from "./PlatformBadge";
-import { fromNow, prettyDate } from "../hooks/time";
 
-export default function ResultCard({ item, onToggleStar }) {
+import { fromNow, prettyDate } from "../hooks/time";
+import type { FeedItem } from "../types";
+import PlatformBadge from "./PlatformBadge";
+
+interface ResultCardProps {
+  item: FeedItem;
+  onToggleStar?: (item: FeedItem) => void;
+}
+
+export default function ResultCard({ item, onToggleStar }: ResultCardProps) {
   const text = item.text_excerpt || item.text_content || "(khong co noi dung text)";
   return (
     <article className="result-card">
@@ -16,7 +23,7 @@ export default function ResultCard({ item, onToggleStar }) {
             onClick={() => onToggleStar?.(item)}
             title={item.starred ? "Bo danh dau" : "Danh dau quan trong"}
           >
-            {item.starred ? "★" : "☆"}
+            {item.starred ? "*" : "+"}
           </button>
           <span className="dot" />
           <span className="ts" title={prettyDate(item.captured_at)}>
@@ -34,7 +41,7 @@ export default function ResultCard({ item, onToggleStar }) {
         </div>
         <p>{text}</p>
         {item.note ? <div className="note-inline">Note: {item.note.slice(0, 120)}</div> : null}
-        <div className="score">score: {item.score?.toFixed ? item.score.toFixed(6) : item.score}</div>
+        <div className="score">score: {typeof item.score === "number" ? item.score.toFixed(6) : item.score}</div>
       </div>
     </article>
   );

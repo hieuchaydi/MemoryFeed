@@ -1,6 +1,6 @@
-﻿import clsx from "clsx";
+import clsx from "clsx";
 
-const MAP = {
+const MAP: Record<string, { emoji: string; tone: string }> = {
   twitter: { emoji: "🐦", tone: "tw" },
   facebook: { emoji: "👥", tone: "fb" },
   youtube: { emoji: "📺", tone: "yt" },
@@ -9,12 +9,17 @@ const MAP = {
   unknown: { emoji: "🧠", tone: "uk" },
 };
 
-export default function PlatformBadge({ platform }) {
-  const config = MAP[platform] || MAP.unknown;
+interface PlatformBadgeProps {
+  platform: string;
+}
+
+export default function PlatformBadge({ platform }: PlatformBadgeProps) {
+  const normalized = platform || "unknown";
+  const config = MAP[normalized] || MAP.unknown;
   return (
     <span className={clsx("platform-badge", `tone-${config.tone}`)}>
       <span>{config.emoji}</span>
-      <span>{platform}</span>
+      <span>{normalized}</span>
     </span>
   );
 }

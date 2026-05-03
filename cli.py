@@ -35,6 +35,66 @@ def serve(host: str, port: int) -> None:
     uvicorn.run("backend.server:app", host=host, port=port, reload=False)
 
 
+@cli.command("serve-web")
+@click.option("--host", default="0.0.0.0", show_default=True)
+@click.option("--port", default=7749, show_default=True, type=int)
+@click.option("--skip-frontend-install", is_flag=True, help="Skip npm install in frontend/")
+@click.option("--skip-build", is_flag=True, help="Skip frontend build step")
+def serve_web(host: str, port: int, skip_frontend_install: bool, skip_build: bool) -> None:
+    """Build frontend and serve public web app via FastAPI."""
+    frontend_dir = Path("frontend")
+    if not frontend_dir.exists():
+        console.print("[red]Missing frontend directory[/red]")
+        sys.exit(1)
+
+    if not skip_frontend_install:
+        console.print("[cyan]Installing frontend dependencies...[/cyan]")
+        try:
+            subprocess.check_call(["npm", "install"], cwd=frontend_dir)
+        except FileNotFoundError:
+            console.print("[red]npm not found. Install Node.js 20+ first.[/red]")
+            sys.exit(1)
+        except subprocess.CalledProcessError as exc:
+            console.print(f"[red]npm install failed:[/red] {exc}")
+            sys.exit(exc.returncode)
+
+    if not skip_build:
+        console.print("[cyan]Building frontend (Vite)...[/cyan]")
+        try:
+            subprocess.check_call(["npm", "run", "build"], cwd=frontend_dir)
+        except FileNotFoundError:
+            console.print("[red]npm not found. Install Node.js 20+ first.[/red]")
+            sys.exit(1)
+        except subprocess.CalledProcessError as exc:
+            console.print(f"[red]Frontend build failed:[/red] {exc}")
+            sys.exit(exc.returncode)
+
+    console.print(f"[green]Serving MemoryFeed at http://{host}:{port}[/green]")
+    uvicorn.run("backend.server:app", host=host, port=port, reload=False)
+
+
+@cli.command("mcp")
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "streamable-http", "http", "sse"], case_sensitive=False),
+    default="stdio",
+    show_default=True,
+)
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=7748, show_default=True, type=int)
+@click.option("--path", default="/mcp", show_default=True)
+def mcp_server(transport: str, host: str, port: int, path: str) -> None:
+    """Run MemoryFeed MCP server for Claude/Cursor/agents."""
+    try:
+        from backend.mcp_server import run_mcp
+    except Exception as exc:
+        console.print(f"[red]Cannot load MCP server:[/red] {exc}")
+        console.print("Install dependency: pip install \"mcp[cli]\"")
+        sys.exit(1)
+
+    run_mcp(transport=transport, host=host, port=port, path=path)
+
+
 @cli.command()
 @click.argument("query", nargs=1)
 @click.option("--limit", default=10, show_default=True, type=int)

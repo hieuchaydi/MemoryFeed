@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import { fetchNativeStatus, fetchStats, patchItem, searchFeed } from "../api/client";
 import ResultCard from "../components/ResultCard";
+import type { FeedItem } from "../types";
 
-function useDebounced(value, ms = 280) {
+function useDebounced(value: string, ms = 280): string {
   const [state, setState] = useState(value);
   useEffect(() => {
     const t = setTimeout(() => setState(value), ms);
@@ -29,7 +31,7 @@ export default function SearchPage() {
   const nativeQ = useQuery({ queryKey: ["native"], queryFn: fetchNativeStatus, staleTime: 30_000 });
 
   const starMut = useMutation({
-    mutationFn: ({ id, starred }) => patchItem(id, { starred }),
+    mutationFn: ({ id, starred }: { id: string; starred: boolean }) => patchItem(id, { starred }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["search"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
@@ -91,7 +93,7 @@ export default function SearchPage() {
         {!debounced.trim().length ? <div className="state">Nhap tu khoa de bat dau.</div> : null}
 
         <div className="result-list">
-          {results.map((item) => (
+          {results.map((item: FeedItem) => (
             <ResultCard
               key={item.id}
               item={item}

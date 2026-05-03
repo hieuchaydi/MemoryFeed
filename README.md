@@ -6,7 +6,7 @@ MemoryFeed is a local-first social memory system:
 - FastAPI backend stores content in SQLite (WAL) + FTS5.
 - LanceDB stores semantic vectors for multilingual search.
 - Vision pipeline (Ollama `llava:7b`) captions images/memes asynchronously.
-- React + Vite frontend is the main operator console.
+- React + Vite + TypeScript frontend is the main operator console.
 - Optional C++ native acceleration speeds critical ranking/text ops.
 - Item metadata management (star/note/tags), export/import, and queue observability.
 
@@ -19,6 +19,47 @@ No cloud, no API key, no data leaves your machine.
 - `backend`: capture normalization, store, indexing, search, server.
 - `frontend`: React app (Search / Timeline / Stats).
 - `native`: pybind11 C++ module (`memoryfeed_native`) for acceleration.
+
+## Web App (React + TypeScript)
+
+Frontend stack:
+- React 19
+- Vite 8
+- TypeScript (strict mode)
+- React Query + React Router
+
+Commands:
+
+```bash
+cd frontend
+npm install
+npm run typecheck
+npm run build
+```
+
+## MCP Flow (Agent Integration)
+
+MemoryFeed includes a local MCP server so Claude/Cursor/other agents can inspect health and query memories directly.
+
+Run MCP over stdio (recommended for local MCP clients):
+
+```bash
+memoryfeed mcp --transport stdio
+```
+
+Run MCP over streamable HTTP:
+
+```bash
+memoryfeed mcp --transport streamable-http --host 127.0.0.1 --port 7748 --path /mcp
+```
+
+Available MCP tools:
+
+- `detect_stack`
+- `check_project_health`
+- `get_memoryfeed_stats`
+- `search_memory`
+- `timeline_memories`
 
 ## Requirements
 
@@ -53,6 +94,41 @@ This will:
 - check Ollama and pull required models
 - start backend (`:7749`) and frontend (`:5173`)
 - auto-open browser
+
+## Public Web Deploy (React + Vite)
+
+Use this when you want other devices/people to access your web UI.
+
+### Windows
+
+```powershell
+.\deploy_web.ps1
+```
+
+### Linux/macOS
+
+```bash
+bash deploy_web.sh
+```
+
+This flow will:
+- install backend deps
+- build frontend for production (`frontend/dist`)
+- run a public server on `0.0.0.0:7749`
+- serve both API and React app from one URL
+
+Open from another device:
+- `http://<server-ip>:7749`
+
+Optional custom host/port:
+
+```powershell
+.\deploy_web.ps1 -HostIp 0.0.0.0 -Port 8080
+```
+
+```bash
+HOST=0.0.0.0 PORT=8080 bash deploy_web.sh
+```
 
 ## Manual Setup
 
@@ -130,6 +206,8 @@ If native build fails, project continues with Python fallback.
 ```bash
 memoryfeed serve
 memoryfeed search "that angry cat meme last week"
+memoryfeed serve-web --host 0.0.0.0 --port 7749
+memoryfeed mcp --transport stdio
 memoryfeed timeline
 memoryfeed stats
 memoryfeed items --starred

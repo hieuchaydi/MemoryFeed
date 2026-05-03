@@ -1,4 +1,4 @@
-﻿[build-system]
+[build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
@@ -23,6 +23,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "pydantic>=2.6.0",
     "pybind11>=2.12.0",
+    "mcp[cli]>=1.7.0",
 ]
 
 [project.scripts]
@@ -37,5 +38,7 @@ include = [
   "frontend/**",
   "cli.py",
   "setup.sh",
+  "deploy_web.sh",
+  "deploy_web.ps1",
   "README.md"
 ]
