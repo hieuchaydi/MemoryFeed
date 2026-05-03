@@ -1,4 +1,6 @@
-﻿# MemoryFeed
+# MemoryFeed
+
+![MemoryFeed Logo](frontend/public/logo-memoryfeed.svg)
 
 MemoryFeed is a local-first social memory system:
 
@@ -94,6 +96,44 @@ This will:
 - check Ollama and pull required models
 - start backend (`:7749`) and frontend (`:5173`)
 - auto-open browser
+
+## Quickstart 60s
+
+### Local dev console
+
+```bash
+bash quickstart.sh
+```
+
+or on Windows:
+
+```powershell
+.\quickstart.ps1
+```
+
+### Public web (for other devices)
+
+```bash
+bash deploy_web.sh
+```
+
+or on Windows:
+
+```powershell
+.\deploy_web.ps1
+```
+
+### MCP for Claude/Cursor
+
+```bash
+memoryfeed mcp --transport stdio
+```
+
+### Quickstart Demo (GIF)
+
+![Quickstart Demo](docs/assets/quickstart-demo.gif)
+
+Download/open directly: `docs/assets/quickstart-demo.gif`
 
 ## Public Web Deploy (React + Vite)
 
@@ -243,4 +283,3 @@ Environment variables:
 - Dedupe key = URL + first 100 chars of text.
 - If Ollama is down, text capture still works.
 - Image captions are skipped gracefully when download/model fails.
-

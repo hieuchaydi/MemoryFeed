@@ -45,9 +45,14 @@ body {
   border: 1px solid var(--line);
   display: grid;
   place-items: center;
-  font-family: var(--mono);
-  color: var(--accent);
-  font-weight: 700;
+  overflow: hidden;
+  background: #0b1523;
+}
+.logo-mark {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: block;
 }
 .brand h3 { margin: 0; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }

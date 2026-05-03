@@ -19,7 +19,9 @@ export default function App() {
     <div className="app-shell">
       <aside className="left-rail">
         <div className="brand">
-          <div className="sig">MF</div>
+          <div className="sig">
+            <img src="/logo-memoryfeed.svg" alt="MemoryFeed logo" className="logo-mark" />
+          </div>
           <div>
             <h3>MemoryFeed</h3>
             <p>Local Memory Graph</p>
