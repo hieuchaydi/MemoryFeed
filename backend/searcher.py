@@ -20,8 +20,9 @@ class Searcher:
         if not q:
             return []
 
-        fts_hits = await asyncio.to_thread(self.store.search_fts, q, 20, days_back)
-        sem_hits = await self.indexer.semantic_search(q, 20)
+        fts_task = asyncio.to_thread(self.store.search_fts, q, 20, days_back)
+        sem_task = self.indexer.semantic_search(q, 20)
+        fts_hits, sem_hits = await asyncio.gather(fts_task, sem_task)
 
         fts_ids = [item["id"] for item in fts_hits]
         sem_ids = [item.id for item in sem_hits]

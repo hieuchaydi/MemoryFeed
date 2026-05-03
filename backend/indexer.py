@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,8 @@ class IndexerService:
         self._model: SentenceTransformer | None = None
         self._processed = 0
         self._failed = 0
+        self._table_non_empty: bool | None = None
+        self._table_check_at = 0.0
 
         self.db = lancedb.connect(str(LANCEDB_DIR))
         self.table = self._ensure_table()
@@ -107,10 +110,14 @@ class IndexerService:
 
         await asyncio.to_thread(self.table.delete, f"id = '{item_id}'")
         await asyncio.to_thread(self.table.add, [row])
+        self._table_non_empty = True
+        self._table_check_at = time.monotonic()
         await asyncio.to_thread(self.store.mark_embedding_done, item_id)
 
     async def semantic_search(self, query: str, limit: int = 20) -> list[SemanticHit]:
         if not query.strip():
+            return []
+        if not await self._has_vectors():
             return []
         model = await asyncio.to_thread(self._load_model)
         query_vec = await asyncio.to_thread(model.encode, query, normalize_embeddings=True)
@@ -130,6 +137,19 @@ class IndexerService:
             score = float(row.get("_distance", idx))
             hits.append(SemanticHit(id=str(row_id), score=score))
         return hits
+
+    async def _has_vectors(self) -> bool:
+        now = time.monotonic()
+        if self._table_non_empty is not None and (now - self._table_check_at) < 10:
+            return self._table_non_empty
+        try:
+            row_count = await asyncio.to_thread(self.table.count_rows)
+            self._table_non_empty = bool(row_count)
+            self._table_check_at = now
+            return self._table_non_empty
+        except Exception:
+            # If metadata lookup fails, keep semantic search available.
+            return True
 
     def status(self) -> dict[str, int | bool]:
         return {
