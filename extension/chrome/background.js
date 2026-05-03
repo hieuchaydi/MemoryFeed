@@ -1,0 +1,82 @@
+﻿const API_BASE = "http://localhost:7749";
+const BADGE_KEY = "memoryfeed_captured_today";
+const DATE_KEY = "memoryfeed_badge_date";
+
+async function postCapture(payload) {
+  const res = await fetch(`${API_BASE}/capture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`Capture failed with ${res.status}`);
+  }
+  return res.json();
+}
+
+function todayLocal() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function incrementBadge() {
+  const today = todayLocal();
+  const data = await chrome.storage.local.get([BADGE_KEY, DATE_KEY]);
+  let count = Number(data[BADGE_KEY] || 0);
+  const storedDate = data[DATE_KEY];
+
+  if (storedDate !== today) {
+    count = 0;
+  }
+  count += 1;
+
+  await chrome.storage.local.set({ [BADGE_KEY]: count, [DATE_KEY]: today });
+  chrome.action.setBadgeBackgroundColor({ color: "#2563eb" });
+  chrome.action.setBadgeText({ text: String(count) });
+}
+
+async function syncBadgeFromBackend() {
+  try {
+    const res = await fetch(`${API_BASE}/api/stats`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const todayCount = Number(data.today || 0);
+    await chrome.storage.local.set({ [BADGE_KEY]: todayCount, [DATE_KEY]: todayLocal() });
+    chrome.action.setBadgeBackgroundColor({ color: "#2563eb" });
+    chrome.action.setBadgeText({ text: todayCount > 0 ? String(todayCount) : "" });
+  } catch (_) {
+    // Backend may not be running; keep extension silent.
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  syncBadgeFromBackend();
+});
+
+if (chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    syncBadgeFromBackend();
+  });
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || message.type !== "MEMORYFEED_CAPTURE") return false;
+
+  postCapture(message.payload)
+    .then(async (data) => {
+      if (data.status === "stored") {
+        await incrementBadge();
+      }
+      sendResponse({ ok: true, data });
+    })
+    .catch((error) => {
+      console.debug("MemoryFeed backend unavailable:", error);
+      sendResponse({ ok: false, error: String(error) });
+    });
+
+  return true;
+});
+

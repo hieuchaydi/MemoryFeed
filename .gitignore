@@ -1,0 +1,27 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+
+# Data
+.memoryfeed/
+
+# Native build
+native/build/
+native/*.pyd
+native/*.so
+native/*.dll
+native/*.exp
+native/*.lib
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
