@@ -1,32 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="260" viewBox="0 0 920 260" fill="none">
   <defs>
-    <linearGradient id="mf-chip-bg" x1="40" y1="26" x2="234" y2="234" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1A2E4D"/>
-      <stop offset="1" stop-color="#0A1220"/>
+    <linearGradient id="mf-chip-bg" x1="40" y1="24" x2="236" y2="236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F3FDFF"/>
+      <stop offset="1" stop-color="#DDFEF2"/>
     </linearGradient>
     <linearGradient id="mf-line" x1="78" y1="74" x2="206" y2="186" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#65C9FF"/>
-      <stop offset="1" stop-color="#3DD6B0"/>
+      <stop offset="0" stop-color="#2BAAFF"/>
+      <stop offset="1" stop-color="#16C89B"/>
     </linearGradient>
-    <linearGradient id="mf-text" x1="286" y1="82" x2="870" y2="188" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#DDEBFF"/>
-      <stop offset="1" stop-color="#9FDCCF"/>
+    <linearGradient id="mf-text" x1="286" y1="82" x2="872" y2="186" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F4FBFF"/>
+      <stop offset="1" stop-color="#D8FFF1"/>
     </linearGradient>
+    <filter id="mf-glow" x="8" y="0" width="286" height="260" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feBlend in="SourceGraphic" in2="blur" mode="normal"/>
+    </filter>
   </defs>
 
-  <rect x="32" y="24" width="208" height="208" rx="52" fill="url(#mf-chip-bg)" stroke="#27456F" stroke-width="8"/>
-  <path d="M72 170V86L104 132L136 96L168 132L200 86V170" stroke="url(#mf-line)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="72" cy="86" r="7.8" fill="#65C9FF"/>
-  <circle cx="104" cy="132" r="7.8" fill="#7FDBFF"/>
-  <circle cx="136" cy="96" r="7.8" fill="#A3EAFF"/>
-  <circle cx="168" cy="132" r="7.8" fill="#68E4C7"/>
-  <circle cx="200" cy="86" r="7.8" fill="#3DD6B0"/>
-  <path d="M74 188H198" stroke="#2B4E7D" stroke-width="6" stroke-linecap="round"/>
+  <g filter="url(#mf-glow)">
+    <rect x="34" y="26" width="206" height="206" rx="52" fill="url(#mf-chip-bg)" stroke="#8EDCFF" stroke-width="8"/>
+    <path d="M72 168V88L104 132L136 96L168 132L200 88V168" stroke="url(#mf-line)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="72" cy="88" r="7.8" fill="#2BAAFF"/>
+    <circle cx="104" cy="132" r="7.8" fill="#4DBDFF"/>
+    <circle cx="136" cy="96" r="7.8" fill="#66CEFF"/>
+    <circle cx="168" cy="132" r="7.8" fill="#30D9B0"/>
+    <circle cx="200" cy="88" r="7.8" fill="#16C89B"/>
+    <path d="M74 186H198" stroke="#7CD9F7" stroke-width="6" stroke-linecap="round"/>
+  </g>
 
   <text x="284" y="132" fill="url(#mf-text)" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="84" font-weight="700" letter-spacing="0.5">
     MemoryFeed
   </text>
-  <text x="287" y="178" fill="#87A6CE" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="30" font-weight="500" letter-spacing="3.8">
+  <text x="287" y="178" fill="#A8EEDC" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="30" font-weight="600" letter-spacing="3.8">
     LOCAL MEMORY GRAPH
   </text>
 </svg>
