@@ -8,12 +8,14 @@ MemoryFeed is a local-first social memory system:
 - Vision pipeline (Ollama `llava:7b`) captions images/memes asynchronously.
 - React + Vite frontend is the main operator console.
 - Optional C++ native acceleration speeds critical ranking/text ops.
+- Item metadata management (star/note/tags), export/import, and queue observability.
 
 No cloud, no API key, no data leaves your machine.
 
 ## Architecture
 
-- `extension/chrome`: content capture + service worker upload.
+- `extension/chrome`: Chromium extension (Chrome/Edge/Brave).
+- `extension/firefox`: Firefox extension package.
 - `backend`: capture normalization, store, indexing, search, server.
 - `frontend`: React app (Search / Timeline / Stats).
 - `native`: pybind11 C++ module (`memoryfeed_native`) for acceleration.
@@ -93,9 +95,20 @@ If native build fails, project continues with Python fallback.
 
 ## Extension Load
 
-1. Open `chrome://extensions`
-2. Enable Developer mode
-3. Load unpacked: `extension/chrome/`
+### Chrome / Edge / Brave (Chromium)
+1. Open extensions page:
+- Chrome: `chrome://extensions`
+- Edge: `edge://extensions`
+- Brave: `brave://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select: `extension/chrome/`
+
+### Firefox
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on...**
+3. Choose: `extension/firefox/manifest.json`
+4. Keep backend running on `http://localhost:7749`
 
 ## API Endpoints
 
@@ -104,6 +117,12 @@ If native build fails, project continues with Python fallback.
 - `GET /api/timeline`
 - `GET /api/stats`
 - `GET /api/native/status`
+- `GET /api/queues/status`
+- `GET /api/items?limit=&offset=&platform=&starred_only=`
+- `PATCH /api/items/{id}` (update `starred`, `note`, `tags`)
+- `POST /api/admin/export`
+- `POST /api/admin/import`
+- `DELETE /api/admin/reset?confirm=RESET`
 - `GET /healthz`
 
 ## CLI
@@ -113,6 +132,9 @@ memoryfeed serve
 memoryfeed search "that angry cat meme last week"
 memoryfeed timeline
 memoryfeed stats
+memoryfeed items --starred
+memoryfeed export
+memoryfeed import --file ~/.memoryfeed/exports/memoryfeed-export-YYYY-MM-DD.json
 memoryfeed models
 memoryfeed build-native
 memoryfeed build-frontend

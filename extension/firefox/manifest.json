@@ -1,0 +1,34 @@
+﻿{
+  "manifest_version": 3,
+  "name": "MemoryFeed",
+  "version": "0.1.0",
+  "description": "Local-first social memory capture",
+  "action": {
+    "default_title": "MemoryFeed",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://localhost:7749/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://twitter.com/*",
+        "https://x.com/*",
+        "https://www.youtube.com/*",
+        "https://www.linkedin.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "memoryfeed@local.dev",
+      "strict_min_version": "121.0"
+    }
+  }
+}

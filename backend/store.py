@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import threading
+import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -98,11 +99,22 @@ class Store:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_captured_at ON items(captured_at);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_type ON items(content_type);")
+                self._ensure_column(conn, "items", "starred", "INTEGER DEFAULT 0")
+                self._ensure_column(conn, "items", "note", "TEXT")
+                self._ensure_column(conn, "items", "tags", "TEXT")
                 conn.commit()
             finally:
                 conn.close()
 
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, col_name: str, col_type: str) -> None:
+        cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        names = {row[1] for row in cols}
+        if col_name not in names:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+
     def insert_item(self, item: dict[str, Any]) -> tuple[bool, str | None]:
+        item = self._normalize_item_for_insert(item)
         with self._lock:
             conn = self._connect()
             try:
@@ -117,8 +129,9 @@ class Store:
                     INSERT INTO items (
                         id, url, platform, content_type, text_content, image_urls,
                         image_captions, author, captured_at, dwell_seconds,
-                        embedding_done, vision_done, dedupe_key, image_cache_paths
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        embedding_done, vision_done, dedupe_key, image_cache_paths,
+                        starred, note, tags
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"],
@@ -135,12 +148,40 @@ class Store:
                         int(item.get("vision_done", 0)),
                         item["dedupe_key"],
                         json.dumps(item.get("image_cache_paths", []), ensure_ascii=False),
+                        int(bool(item.get("starred", 0))),
+                        item.get("note"),
+                        json.dumps(item.get("tags", []), ensure_ascii=False),
                     ),
                 )
                 conn.commit()
                 return True, item["id"]
             finally:
                 conn.close()
+
+    @staticmethod
+    def _normalize_item_for_insert(item: dict[str, Any]) -> dict[str, Any]:
+        out = dict(item)
+        out.setdefault("image_urls", [])
+        out.setdefault("image_captions", [])
+        out.setdefault("image_cache_paths", [])
+        out.setdefault("author", None)
+        out.setdefault("dwell_seconds", 0.0)
+        out.setdefault("embedding_done", 0)
+        out.setdefault("vision_done", 1 if not out.get("image_urls") else 0)
+        out.setdefault("starred", 0)
+        out.setdefault("note", None)
+        out.setdefault("tags", [])
+        out.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
+        out.setdefault("content_type", "post")
+        out.setdefault("platform", "unknown")
+        out.setdefault("text_content", "")
+
+        if not out.get("dedupe_key"):
+            seed = f"{out.get('url', '')}|{str(out.get('text_content', ''))[:100]}".encode(
+                "utf-8", errors="ignore"
+            )
+            out["dedupe_key"] = hashlib.sha256(seed).hexdigest()
+        return out
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
         conn = self._connect()
@@ -179,6 +220,37 @@ class Store:
                 conn.commit()
             finally:
                 conn.close()
+
+    def update_item_metadata(
+        self,
+        item_id: str,
+        starred: bool | None = None,
+        note: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        updates: list[str] = []
+        params: list[Any] = []
+        if starred is not None:
+            updates.append("starred = ?")
+            params.append(1 if starred else 0)
+        if note is not None:
+            updates.append("note = ?")
+            params.append(note)
+        if tags is not None:
+            updates.append("tags = ?")
+            params.append(json.dumps(tags, ensure_ascii=False))
+        if not updates:
+            return self.get_item(item_id)
+
+        params.append(item_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_item(item_id)
 
     def search_fts(self, query: str, limit: int = 20, days_back: int | None = None) -> list[dict[str, Any]]:
         conn = self._connect()
@@ -279,6 +351,46 @@ class Store:
         finally:
             conn.close()
 
+    def list_items(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        platform: str | None = None,
+        starred_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            where = []
+            params: list[Any] = []
+            if platform:
+                where.append("platform = ?")
+                params.append(platform)
+            if starred_only:
+                where.append("starred = 1")
+            clause = f"WHERE {' AND '.join(where)}" if where else ""
+            params.extend([limit, offset])
+            rows = conn.execute(
+                f"SELECT * FROM items {clause} ORDER BY captured_at DESC LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
+            return [self._row_to_item(row) for row in rows]
+        finally:
+            conn.close()
+
+    def export_items(self) -> list[dict[str, Any]]:
+        return self.all_items()
+
+    def import_items(self, items: list[dict[str, Any]]) -> dict[str, int]:
+        inserted = 0
+        duplicates = 0
+        for item in items:
+            ok, _ = self.insert_item(item)
+            if ok:
+                inserted += 1
+            else:
+                duplicates += 1
+        return {"inserted": inserted, "duplicates": duplicates}
+
     def get_items_by_ids(self, ids: list[str]) -> dict[str, dict[str, Any]]:
         if not ids:
             return {}
@@ -324,6 +436,9 @@ class Store:
             "embedding_done": bool(row["embedding_done"]),
             "vision_done": bool(row["vision_done"]),
             "dedupe_key": row["dedupe_key"],
+            "starred": bool(row["starred"]) if "starred" in row.keys() else False,
+            "note": row["note"] if "note" in row.keys() else None,
+            "tags": json.loads(row["tags"] or "[]") if "tags" in row.keys() and row["tags"] else [],
         }
 
     @staticmethod
@@ -340,6 +455,7 @@ class Store:
             "author": row["author"],
             "captured_at": row["captured_at"],
             "fts_score": float(row[bm25_key]),
+            "starred": bool(row["starred"]) if "starred" in row.keys() else False,
         }
 
 

@@ -1,6 +1,6 @@
-﻿import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchNativeStatus, fetchStats, searchFeed } from "../api/client";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchNativeStatus, fetchStats, patchItem, searchFeed } from "../api/client";
 import ResultCard from "../components/ResultCard";
 
 function useDebounced(value, ms = 280) {
@@ -15,7 +15,9 @@ function useDebounced(value, ms = 280) {
 export default function SearchPage() {
   const [query, setQuery] = useState("");
   const [daysBack, setDaysBack] = useState("30");
+  const [starredOnly, setStarredOnly] = useState(false);
   const debounced = useDebounced(query, 300);
+  const qc = useQueryClient();
 
   const searchQ = useQuery({
     queryKey: ["search", debounced, daysBack],
@@ -26,26 +28,37 @@ export default function SearchPage() {
   const statsQ = useQuery({ queryKey: ["stats"], queryFn: fetchStats });
   const nativeQ = useQuery({ queryKey: ["native"], queryFn: fetchNativeStatus, staleTime: 30_000 });
 
-  const results = searchQ.data?.results || [];
+  const starMut = useMutation({
+    mutationFn: ({ id, starred }) => patchItem(id, { starred }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["search"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+
+  const rawResults = searchQ.data?.results || [];
+  const results = starredOnly ? rawResults.filter((x) => x.starred) : rawResults;
 
   return (
     <section className="page">
       <div className="hero-panel">
         <h1>MemoryFeed Console</h1>
-        <p>Truy vấn tự nhiên: <code>meme mèo giận tuần trước</code> hoặc <code>startup culture failure</code>.</p>
+        <p>
+          Truy van tu nhien: <code>meme meo gian tuan truoc</code> hoac <code>startup culture failure</code>.
+        </p>
 
         <div className="query-grid">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Nhập câu truy vấn..."
+            placeholder="Nhap cau truy van..."
             className="query-input"
           />
           <select value={daysBack} onChange={(e) => setDaysBack(e.target.value)} className="days-select">
-            <option value="">Tất cả thời gian</option>
-            <option value="7">7 ngày</option>
-            <option value="30">30 ngày</option>
-            <option value="90">90 ngày</option>
+            <option value="">Tat ca thoi gian</option>
+            <option value="7">7 ngay</option>
+            <option value="30">30 ngay</option>
+            <option value="90">90 ngay</option>
           </select>
         </div>
 
@@ -63,22 +76,30 @@ export default function SearchPage() {
             <b className={nativeQ.data?.enabled ? "ok" : "warn"}>{nativeQ.data?.enabled ? "enabled" : "python"}</b>
           </div>
         </div>
+
+        <label className="toggle-row">
+          <input type="checkbox" checked={starredOnly} onChange={(e) => setStarredOnly(e.target.checked)} />
+          <span>Chi hien thi muc da danh dau sao</span>
+        </label>
       </div>
 
       <div className="results-wrap">
-        {searchQ.isFetching ? <div className="state">Đang tìm...</div> : null}
+        {searchQ.isFetching ? <div className="state">Dang tim...</div> : null}
         {!searchQ.isFetching && debounced.trim().length > 0 && results.length === 0 ? (
-          <div className="state">Không tìm thấy kết quả.</div>
+          <div className="state">Khong tim thay ket qua.</div>
         ) : null}
-        {!debounced.trim().length ? <div className="state">Nhập từ khóa để bắt đầu.</div> : null}
+        {!debounced.trim().length ? <div className="state">Nhap tu khoa de bat dau.</div> : null}
 
         <div className="result-list">
           {results.map((item) => (
-            <ResultCard key={item.id} item={item} />
+            <ResultCard
+              key={item.id}
+              item={item}
+              onToggleStar={(row) => starMut.mutate({ id: row.id, starred: !row.starred })}
+            />
           ))}
         </div>
       </div>
     </section>
   );
 }
-

@@ -29,6 +29,8 @@ class VisionService:
         self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=3000)
         self._task: asyncio.Task[Any] | None = None
         self._running = False
+        self._processed = 0
+        self._failed = 0
 
     async def start(self) -> None:
         if self._running:
@@ -54,7 +56,9 @@ class VisionService:
             item_id = await self.queue.get()
             try:
                 await self.process_item(item_id)
+                self._processed += 1
             except Exception as exc:
+                self._failed += 1
                 logger.exception("Vision processing failed for %s: %s", item_id, exc)
             finally:
                 self.queue.task_done()
@@ -123,6 +127,14 @@ class VisionService:
         except Exception as exc:
             logger.debug("Vision model unavailable or failed for %s: %s", image_path, exc)
             return ""
+
+    def status(self) -> dict[str, int | bool]:
+        return {
+            "running": self._running,
+            "queue_size": self.queue.qsize(),
+            "processed": self._processed,
+            "failed": self._failed,
+        }
 
 
 import contextlib

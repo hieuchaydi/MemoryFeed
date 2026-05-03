@@ -57,6 +57,9 @@ class TimelineItem(BaseModel):
     author: str | None = None
     captured_at: datetime
     dwell_seconds: float = 0.0
+    starred: bool = False
+    note: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class PlatformStat(BaseModel):
@@ -74,3 +77,13 @@ class StatsResponse(BaseModel):
 class CaptureResponse(BaseModel):
     status: Literal["stored", "duplicate"]
     id: str | None = None
+
+
+class ItemMetaPatch(BaseModel):
+    starred: bool | None = None
+    note: str | None = Field(default=None, max_length=2000)
+    tags: list[str] | None = None
+
+
+class ImportPayload(BaseModel):
+    items: list[dict]

@@ -34,3 +34,31 @@ export function fetchStats() {
 export function fetchNativeStatus() {
   return apiFetch("/api/native/status");
 }
+
+export function fetchQueues() {
+  return apiFetch("/api/queues/status");
+}
+
+export function listItems({ limit = 50, offset = 0, platform, starredOnly = false } = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  if (platform && platform !== "all") params.set("platform", platform);
+  if (starredOnly) params.set("starred_only", "true");
+  return apiFetch(`/api/items?${params.toString()}`);
+}
+
+export function patchItem(itemId, payload) {
+  return apiFetch(`/api/items/${encodeURIComponent(itemId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function exportData() {
+  return apiFetch("/api/admin/export", { method: "POST" });
+}
+
+export function resetData() {
+  return apiFetch("/api/admin/reset?confirm=RESET", { method: "DELETE" });
+}

@@ -5,18 +5,19 @@ import logging
 from datetime import date
 from pathlib import Path
 from typing import Any
+import json
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.capture import normalize_capture
 from backend.indexer import IndexerService
-from backend.models import CaptureRequest, CaptureResponse
+from backend.models import CaptureRequest, CaptureResponse, ImportPayload, ItemMetaPatch
 from backend.native_accel import status as native_status
 from backend.searcher import Searcher
-from backend.store import IMAGE_CACHE_DIR, Store
+from backend.store import DATA_DIR, IMAGE_CACHE_DIR, Store
 from backend.vision import VisionService
 
 logging.basicConfig(level=logging.INFO)
@@ -103,12 +104,97 @@ async def timeline_api(
 
 @app.get("/api/stats")
 async def stats_api() -> dict[str, Any]:
-    return await asyncio.to_thread(store.stats)
+    payload = await asyncio.to_thread(store.stats)
+    payload["queues"] = {
+        "indexer": indexer.status(),
+        "vision": vision.status(),
+    }
+    return payload
 
 
 @app.get("/api/native/status")
 async def native_status_api() -> dict[str, str | bool]:
     return native_status()
+
+
+@app.get("/api/queues/status")
+async def queue_status_api() -> dict[str, Any]:
+    return {
+        "indexer": indexer.status(),
+        "vision": vision.status(),
+    }
+
+
+@app.get("/api/items")
+async def list_items_api(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    platform: str | None = Query(default=None),
+    starred_only: bool = Query(default=False),
+) -> dict[str, Any]:
+    items = await asyncio.to_thread(store.list_items, limit, offset, platform, starred_only)
+    return {"count": len(items), "items": items}
+
+
+@app.patch("/api/items/{item_id}")
+async def patch_item_api(item_id: str, payload: ItemMetaPatch) -> dict[str, Any]:
+    updated = await asyncio.to_thread(
+        store.update_item_metadata,
+        item_id,
+        payload.starred,
+        payload.note,
+        payload.tags,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"item": updated}
+
+
+@app.post("/api/admin/export")
+async def export_data_api() -> dict[str, Any]:
+    items = await asyncio.to_thread(store.export_items)
+    export_path = DATA_DIR / "exports"
+    export_path.mkdir(parents=True, exist_ok=True)
+    target = export_path / f"memoryfeed-export-{date.today().isoformat()}.json"
+    target.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "file": str(target), "count": len(items)}
+
+
+@app.post("/api/admin/import")
+async def import_data_api(payload: ImportPayload) -> dict[str, Any]:
+    inserted = 0
+    duplicates = 0
+    enqueued_vision = 0
+    enqueued_index = 0
+
+    for item in payload.items:
+        ok, item_id = await asyncio.to_thread(store.insert_item, item)
+        if ok:
+            inserted += 1
+            if item.get("image_urls"):
+                await vision.enqueue(item["id"])
+                enqueued_vision += 1
+            else:
+                await indexer.enqueue(item["id"])
+                enqueued_index += 1
+        else:
+            duplicates += 1
+
+    return {
+        "ok": True,
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "enqueued_vision": enqueued_vision,
+        "enqueued_index": enqueued_index,
+    }
+
+
+@app.delete("/api/admin/reset")
+async def reset_data_api(confirm: str = Query(default="")) -> dict[str, Any]:
+    if confirm != "RESET":
+        raise HTTPException(status_code=400, detail="Set confirm=RESET to proceed")
+    await asyncio.to_thread(store.delete_all)
+    return {"ok": True}
 
 
 @app.get("/healthz")

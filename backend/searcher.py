@@ -59,6 +59,9 @@ class Searcher:
                     "author": item.get("author"),
                     "captured_at": item.get("captured_at"),
                     "score": round(float(score), 8),
+                    "starred": bool(item.get("starred", False)),
+                    "note": item.get("note"),
+                    "tags": item.get("tags", []),
                 }
             )
             if len(merged) >= limit:

@@ -28,6 +28,8 @@ class IndexerService:
         self._worker_task: asyncio.Task[Any] | None = None
         self._running = False
         self._model: SentenceTransformer | None = None
+        self._processed = 0
+        self._failed = 0
 
         self.db = lancedb.connect(str(LANCEDB_DIR))
         self.table = self._ensure_table()
@@ -75,7 +77,9 @@ class IndexerService:
             item_id = await self.queue.get()
             try:
                 await self.index_item(item_id)
+                self._processed += 1
             except Exception as exc:
+                self._failed += 1
                 logger.exception("Failed to index item %s: %s", item_id, exc)
             finally:
                 self.queue.task_done()
@@ -126,6 +130,14 @@ class IndexerService:
             score = float(row.get("_distance", idx))
             hits.append(SemanticHit(id=str(row_id), score=score))
         return hits
+
+    def status(self) -> dict[str, int | bool]:
+        return {
+            "running": self._running,
+            "queue_size": self.queue.qsize(),
+            "processed": self._processed,
+            "failed": self._failed,
+        }
 
 
 import contextlib
