@@ -225,6 +225,18 @@ memoryfeed reset
 - `~/.memoryfeed/lancedb/`
 - `~/.memoryfeed/images/`
 
+## Logging
+
+- Log file (default): `~/.memoryfeed/logs/memoryfeed.log`
+- Rotating policy: 5 MB per file, 3 backups
+- Request logs include method, path, status, request id, and duration
+
+Environment variables:
+
+- `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`
+- `MEMORYFEED_LOG_FORMAT=plain|json`
+- `MEMORYFEED_LOG_FILE=/custom/path/memoryfeed.log`
+
 ## Notes
 
 - `/capture` is non-blocking: vision + embedding run in background queues.

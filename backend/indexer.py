@@ -61,6 +61,7 @@ class IndexerService:
             return
         self._running = True
         self._worker_task = asyncio.create_task(self._worker(), name="memoryfeed-indexer")
+        logger.info("indexer_started")
 
     async def stop(self) -> None:
         self._running = False
@@ -68,10 +69,12 @@ class IndexerService:
             self._worker_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._worker_task
+        logger.info("indexer_stopped processed=%s failed=%s", self._processed, self._failed)
 
     async def enqueue(self, item_id: str) -> None:
         try:
             self.queue.put_nowait(item_id)
+            logger.debug("indexer_enqueue item_id=%s queue_size=%s", item_id, self.queue.qsize())
         except asyncio.QueueFull:
             logger.warning("Indexer queue full. Dropping item_id=%s", item_id)
 

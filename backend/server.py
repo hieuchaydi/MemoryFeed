@@ -2,25 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any
 import json
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.capture import normalize_capture
 from backend.indexer import IndexerService
+from backend.logging_setup import configure_logging
 from backend.models import CaptureRequest, CaptureResponse, ImportPayload, ItemMetaPatch
 from backend.native_accel import status as native_status
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, IMAGE_CACHE_DIR, Store
 from backend.vision import VisionService
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger("memoryfeed")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -53,11 +57,42 @@ if IMAGE_CACHE_DIR.exists():
     app.mount("/images", StaticFiles(directory=str(IMAGE_CACHE_DIR)), name="images")
 
 
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next) -> Response:
+    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+        logger.exception(
+            "request_failed method=%s path=%s request_id=%s duration_ms=%s",
+            request.method,
+            request.url.path,
+            request_id,
+            elapsed_ms,
+        )
+        raise
+
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+    response.headers["x-request-id"] = request_id
+    if request.url.path != "/healthz":
+        logger.info(
+            "request method=%s path=%s status=%s request_id=%s duration_ms=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            request_id,
+            elapsed_ms,
+        )
+    return response
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     await indexer.start()
     await vision.start()
-    logger.info("MemoryFeed started")
+    logger.info("MemoryFeed started data_dir=%s", store.db_path.parent)
 
 
 @app.on_event("shutdown")
@@ -73,12 +108,14 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
     inserted, item_id = await asyncio.to_thread(store.insert_item, item)
 
     if not inserted:
+        logger.info("capture duplicate id=%s url=%s", item_id, item.get("url"))
         return CaptureResponse(status="duplicate", id=item_id)
 
     if item.get("image_urls"):
         await vision.enqueue(item["id"])
     else:
         await indexer.enqueue(item["id"])
+    logger.info("capture stored id=%s platform=%s", item["id"], item.get("platform"))
     return CaptureResponse(status="stored", id=item["id"])
 
 
@@ -180,13 +217,15 @@ async def import_data_api(payload: ImportPayload) -> dict[str, Any]:
         else:
             duplicates += 1
 
-    return {
+    report = {
         "ok": True,
         "inserted": inserted,
         "duplicates": duplicates,
         "enqueued_vision": enqueued_vision,
         "enqueued_index": enqueued_index,
     }
+    logger.info("admin import inserted=%s duplicates=%s", inserted, duplicates)
+    return report
 
 
 @app.delete("/api/admin/reset")
@@ -194,6 +233,7 @@ async def reset_data_api(confirm: str = Query(default="")) -> dict[str, Any]:
     if confirm != "RESET":
         raise HTTPException(status_code=400, detail="Set confirm=RESET to proceed")
     await asyncio.to_thread(store.delete_all)
+    logger.warning("admin reset executed")
     return {"ok": True}
 
 

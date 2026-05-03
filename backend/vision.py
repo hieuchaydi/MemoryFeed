@@ -37,6 +37,7 @@ class VisionService:
             return
         self._running = True
         self._task = asyncio.create_task(self._worker(), name="memoryfeed-vision")
+        logger.info("vision_started")
 
     async def stop(self) -> None:
         self._running = False
@@ -44,10 +45,12 @@ class VisionService:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+        logger.info("vision_stopped processed=%s failed=%s", self._processed, self._failed)
 
     async def enqueue(self, item_id: str) -> None:
         try:
             self.queue.put_nowait(item_id)
+            logger.debug("vision_enqueue item_id=%s queue_size=%s", item_id, self.queue.qsize())
         except asyncio.QueueFull:
             logger.warning("Vision queue full. Dropping item_id=%s", item_id)
 

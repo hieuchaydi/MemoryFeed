@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 import httpx
 
 from backend.indexer import IndexerService
+from backend.logging_setup import configure_logging
 from backend.native_accel import status as native_status
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, DB_PATH, IMAGE_CACHE_DIR, LANCEDB_DIR, Store
@@ -20,6 +22,9 @@ except Exception as exc:  # pragma: no cover
     _MCP_IMPORT_ERROR = exc
 else:
     _MCP_IMPORT_ERROR = None
+
+configure_logging()
+logger = logging.getLogger("memoryfeed.mcp")
 
 
 @dataclass
@@ -44,6 +49,7 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
         ) from _MCP_IMPORT_ERROR
 
     store, indexer, searcher = _create_services()
+    logger.info("create_mcp_server host=%s port=%s path=%s", host, port, path)
     mcp = FastMCP(
         "MemoryFeed MCP",
         host=host,
@@ -193,6 +199,7 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
 
 def run_mcp(transport: str = "stdio", host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp") -> None:
     mcp = create_server(host=host, port=port, path=path)
+    logger.info("run_mcp transport=%s host=%s port=%s path=%s", transport, host, port, path)
     if transport == "stdio":
         mcp.run(transport="stdio")
         return
