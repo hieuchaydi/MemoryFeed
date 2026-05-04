@@ -118,15 +118,9 @@ class Store:
         with self._lock:
             conn = self._connect()
             try:
-                existing = conn.execute(
-                    "SELECT id FROM items WHERE dedupe_key = ? LIMIT 1", (item["dedupe_key"],)
-                ).fetchone()
-                if existing:
-                    return False, str(existing["id"])
-
-                conn.execute(
+                cur = conn.execute(
                     """
-                    INSERT INTO items (
+                    INSERT OR IGNORE INTO items (
                         id, url, platform, content_type, text_content, image_urls,
                         image_captions, author, captured_at, dwell_seconds,
                         embedding_done, vision_done, dedupe_key, image_cache_paths,
@@ -154,7 +148,14 @@ class Store:
                     ),
                 )
                 conn.commit()
-                return True, item["id"]
+
+                if cur.rowcount == 1:
+                    return True, item["id"]
+
+                existing = conn.execute(
+                    "SELECT id FROM items WHERE dedupe_key = ? LIMIT 1", (item["dedupe_key"],)
+                ).fetchone()
+                return False, str(existing["id"]) if existing else None
             finally:
                 conn.close()
 

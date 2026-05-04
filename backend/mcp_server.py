@@ -153,6 +153,7 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 "total": stats.get("total", 0),
                 "native": native_status(),
                 "ollama_ok": ollama_ok,
+                "runtime_perf": searcher.perf_stats(),
             },
             "suggested_next_steps": next_steps,
         }
@@ -164,6 +165,15 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
         payload["native"] = native_status()
         payload["date"] = date.today().isoformat()
         return payload
+
+    @mcp.tool(name="get_runtime_perf")
+    def get_runtime_perf() -> dict[str, Any]:
+        """Returns runtime diagnostics (cache, queues, native status)."""
+        return {
+            "searcher": searcher.perf_stats(),
+            "indexer": indexer.status(),
+            "native": native_status(),
+        }
 
     @mcp.tool(name="search_memory")
     async def search_memory(query: str, limit: int = 10, days_back: int | None = None) -> dict[str, Any]:

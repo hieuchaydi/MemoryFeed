@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +34,13 @@ class IndexerService:
         self._failed = 0
         self._table_non_empty: bool | None = None
         self._table_check_at = 0.0
+        self._query_vec_cache: dict[str, tuple[float, list[float]]] = {}
+        self._query_cache_ttl_s = 30.0
+        self._query_cache_max_size = 512
+        self._query_cache_lock = threading.Lock()
+        self._query_cache_hits = 0
+        self._query_cache_misses = 0
+        self._query_cache_evictions = 0
 
         self.db = lancedb.connect(str(LANCEDB_DIR))
         self.table = self._ensure_table()
@@ -122,9 +130,7 @@ class IndexerService:
             return []
         if not await self._has_vectors():
             return []
-        model = await asyncio.to_thread(self._load_model)
-        query_vec = await asyncio.to_thread(model.encode, query, normalize_embeddings=True)
-        vector = [float(x) for x in query_vec.tolist()]
+        vector = await self._get_query_vector(query)
 
         try:
             results = await asyncio.to_thread(lambda: self.table.search(vector).limit(limit).to_list())
@@ -160,7 +166,36 @@ class IndexerService:
             "queue_size": self.queue.qsize(),
             "processed": self._processed,
             "failed": self._failed,
+            "query_cache_hits": self._query_cache_hits,
+            "query_cache_misses": self._query_cache_misses,
+            "query_cache_evictions": self._query_cache_evictions,
+            "query_cache_size": len(self._query_vec_cache),
         }
+
+    async def _get_query_vector(self, query: str) -> list[float]:
+        normalized = " ".join(query.lower().split())
+        now = time.monotonic()
+        with self._query_cache_lock:
+            hit = self._query_vec_cache.get(normalized)
+            if hit and (now - hit[0]) <= self._query_cache_ttl_s:
+                self._query_cache_hits += 1
+                return list(hit[1])
+            self._query_cache_misses += 1
+            if hit:
+                self._query_vec_cache.pop(normalized, None)
+
+        model = await asyncio.to_thread(self._load_model)
+        query_vec = await asyncio.to_thread(model.encode, query, normalize_embeddings=True)
+        vector = [float(x) for x in query_vec.tolist()]
+
+        with self._query_cache_lock:
+            if len(self._query_vec_cache) >= self._query_cache_max_size:
+                oldest_key = min(self._query_vec_cache, key=lambda k: self._query_vec_cache[k][0])
+                self._query_vec_cache.pop(oldest_key, None)
+                self._query_cache_evictions += 1
+            self._query_vec_cache[normalized] = (time.monotonic(), vector)
+
+        return vector
 
 
 import contextlib

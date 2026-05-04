@@ -43,20 +43,32 @@
 - Native module currently accelerates:
   - text normalization
   - RRF score fusion
+  - RRF top-k ranking output (`rrf_topk`) to reduce Python sorting overhead
+- Python runtime adds:
+  - short-TTL search response cache
+  - semantic query embedding cache (LRU + TTL)
+  - lower-lock insert path (`INSERT OR IGNORE`) for dedupe-heavy ingestion
 - Missing native module must never break runtime.
 
-## 9) Operability
+## 9) Performance Observability
+- Add `/api/perf` endpoint for runtime diagnostics:
+  - search cache hit/miss/eviction
+  - search latency summary and last-stage timings
+  - queue pressure and native status
+- Add CLI command `memoryfeed perf` for quick operator checks.
+
+## 10) Operability
 - One-command startup scripts:
   - Windows: `quickstart.ps1`
   - Linux/macOS: `quickstart.sh`
 - CLI includes operational commands for serve, stats, model checks, frontend build, native build.
 
-## 10) Security & Privacy
+## 11) Security & Privacy
 - No outbound cloud inference.
 - No telemetry.
 - CORS limited to local frontend and browser extension origins.
 
-## 11) Deferred Decisions
+## 12) Deferred Decisions
 - Distributed multi-user mode: deferred.
 - Remote sync and multi-device replication: deferred.
 - GPU-specific native acceleration roadmap: deferred until baseline usage metrics.

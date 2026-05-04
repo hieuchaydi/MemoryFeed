@@ -115,6 +115,7 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
         await vision.enqueue(item["id"])
     else:
         await indexer.enqueue(item["id"])
+    searcher.bump_data_epoch()
     logger.info("capture stored id=%s platform=%s", item["id"], item.get("platform"))
     return CaptureResponse(status="stored", id=item["id"])
 
@@ -162,6 +163,16 @@ async def queue_status_api() -> dict[str, Any]:
     }
 
 
+@app.get("/api/perf")
+async def perf_api() -> dict[str, Any]:
+    return {
+        "searcher": searcher.perf_stats(),
+        "indexer": indexer.status(),
+        "vision": vision.status(),
+        "native": native_status(),
+    }
+
+
 @app.get("/api/items")
 async def list_items_api(
     limit: int = Query(default=50, ge=1, le=500),
@@ -184,6 +195,7 @@ async def patch_item_api(item_id: str, payload: ItemMetaPatch) -> dict[str, Any]
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Item not found")
+    searcher.bump_data_epoch()
     return {"item": updated}
 
 
@@ -216,6 +228,8 @@ async def import_data_api(payload: ImportPayload) -> dict[str, Any]:
                 enqueued_index += 1
         else:
             duplicates += 1
+    if inserted:
+        searcher.bump_data_epoch()
 
     report = {
         "ok": True,
@@ -233,6 +247,7 @@ async def reset_data_api(confirm: str = Query(default="")) -> dict[str, Any]:
     if confirm != "RESET":
         raise HTTPException(status_code=400, detail="Set confirm=RESET to proceed")
     await asyncio.to_thread(store.delete_all)
+    searcher.bump_data_epoch()
     logger.warning("admin reset executed")
     return {"ok": True}
 
@@ -255,7 +270,7 @@ async def frontend_spa(full_path: str) -> Any:
     return {
         "message": "Frontend not built yet",
         "hint": "Run: cd frontend && npm run build",
-        "api": ["/api/search", "/api/timeline", "/api/stats", "/api/native/status"],
+        "api": ["/api/search", "/api/timeline", "/api/stats", "/api/native/status", "/api/perf"],
     }
 
 

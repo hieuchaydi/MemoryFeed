@@ -251,6 +251,21 @@ def models() -> None:
     console.print(table)
 
 
+@cli.command()
+@click.option("--base-url", default="http://127.0.0.1:7749", show_default=True)
+def perf(base_url: str) -> None:
+    """Show runtime performance diagnostics from backend."""
+    url = base_url.rstrip("/") + "/api/perf"
+    try:
+        resp = httpx.get(url, timeout=10.0)
+        resp.raise_for_status()
+    except Exception as exc:
+        console.print(f"[red]Cannot read perf endpoint:[/red] {exc}")
+        sys.exit(1)
+
+    console.print_json(json.dumps(resp.json(), ensure_ascii=False))
+
+
 @cli.command("build-native")
 def build_native() -> None:
     """Build optional C++ acceleration module."""

@@ -57,3 +57,23 @@ def rrf_fuse_fast(fts_ids: list[str], semantic_ids: list[str], k: int = 60) -> d
             score += 1.0 / (rank_sem[item_id] + k)
         out[item_id] = score
     return out
+
+
+def rrf_topk_fast(
+    fts_ids: list[str],
+    semantic_ids: list[str],
+    k: int = 60,
+    limit: int = 20,
+) -> list[tuple[str, float]]:
+    if limit <= 0:
+        return []
+
+    if _native is not None:
+        try:
+            ranked = _native.rrf_topk(fts_ids, semantic_ids, int(k), int(limit))
+            return [(str(item_id), float(score)) for item_id, score in ranked]
+        except Exception:
+            pass
+
+    score_map = rrf_fuse_fast(fts_ids, semantic_ids, k=k)
+    return sorted(score_map.items(), key=lambda kv: kv[1], reverse=True)[:limit]
