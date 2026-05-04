@@ -1,8 +1,8 @@
 ﻿# Project Decisions (MemoryFeed)
 
 ## 1) Product Scope
-- Build MemoryFeed as a local-first social memory system, not a cloud service.
-- Prioritize real-time capture reliability and fast retrieval over heavy online dependencies.
+- Build MemoryFeed as a local capture and indexing system with cloud LLM augmentation.
+- Prioritize real-time capture reliability and fast retrieval, while allowing managed model providers for quality.
 
 ## 2) Data & Storage
 - SQLite in WAL mode for metadata and FTS5 full-text indexing.
@@ -22,7 +22,8 @@
 - `/capture` endpoint returns quickly and never waits for heavy jobs.
 
 ## 5) Async Processing
-- Vision pipeline (Ollama `llava:7b`) runs in background queue.
+- Vision pipeline (Gemini API) runs in background queue.
+- Optional caption rewrite/summarization (Groq Qwen) runs in background queue.
 - Embedding pipeline (`paraphrase-multilingual-MiniLM-L12-v2`) runs in background queue.
 - On failures (network/image/model unavailable), keep item persisted and continue.
 
@@ -64,7 +65,7 @@
 - CLI includes operational commands for serve, stats, model checks, frontend build, native build.
 
 ## 11) Security & Privacy
-- No outbound cloud inference.
+- Outbound inference is allowed only to configured providers (Gemini/Groq).
 - No telemetry.
 - CORS limited to local frontend and browser extension origins.
 

@@ -1,6 +1,12 @@
-﻿const input = document.getElementById("q");
+const input = document.getElementById("q");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
+const debugBox = document.getElementById("debugBox");
+const btnSelfTest = document.getElementById("btnSelfTest");
+const btnCaptureNow = document.getElementById("btnCaptureNow");
+const btnGrantTikTok = document.getElementById("btnGrantTikTok");
+const btnRefreshDebug = document.getElementById("btnRefreshDebug");
+const ext = typeof browser !== "undefined" ? browser : chrome;
 
 let timer = null;
 
@@ -11,6 +17,7 @@ function platformEmoji(platform) {
     youtube: "📺",
     linkedin: "💼",
     instagram: "📸",
+    tiktok: "🎵",
     unknown: "🧠",
   }[platform] || "🧠";
 }
@@ -36,7 +43,7 @@ function renderResults(results) {
 
     const text = document.createElement("div");
     text.className = "text";
-    text.textContent = item.text_excerpt || item.text_content?.slice(0, 150) || "(Không có text)";
+    text.textContent = item.text_excerpt || item.text_content?.slice(0, 150) || "(Không có nội dung văn bản)";
 
     a.appendChild(meta);
     a.appendChild(text);
@@ -44,10 +51,32 @@ function renderResults(results) {
   }
 }
 
+function renderDebug(status) {
+  if (!status) {
+    debugBox.textContent = "Chưa có log.";
+    return;
+  }
+
+  const lines = [];
+  lines.push(`Kết nối: ${status.ok ? "thành công" : "thất bại"}`);
+  if (status.status) lines.push(`Trạng thái ghi nhận: ${status.status}`);
+  if (status.platform) lines.push(`Nền tảng: ${status.platform}`);
+  if (status.url) lines.push(`URL: ${status.url}`);
+  if (status.error) lines.push(`Lỗi: ${status.error}`);
+  if (status.self_test) lines.push("Nguồn log: tự kiểm tra");
+  if (status.at) lines.push(`Thời điểm: ${status.at}`);
+  debugBox.textContent = lines.join("\n");
+}
+
+async function refreshDebugStatus() {
+  const keys = await ext.storage.local.get(["memoryfeed_last_status"]);
+  renderDebug(keys.memoryfeed_last_status);
+}
+
 async function runSearch(query) {
   if (!query.trim()) {
     resultsEl.innerHTML = "";
-    statusEl.textContent = "Nhập từ khóa để tìm trong MemoryFeed local.";
+    statusEl.textContent = "Nhập từ khóa để tìm trong MemoryFeed cục bộ.";
     return;
   }
 
@@ -69,3 +98,65 @@ input.addEventListener("input", () => {
   timer = setTimeout(() => runSearch(input.value), 300);
 });
 
+btnSelfTest.addEventListener("click", () => {
+  ext.runtime.sendMessage({ type: "MEMORYFEED_SELF_TEST" }, async (resp) => {
+    if (chrome.runtime.lastError) {
+      debugBox.textContent = `Lỗi runtime: ${chrome.runtime.lastError.message}`;
+      return;
+    }
+    if (!resp?.ok) {
+      debugBox.textContent = `Tự kiểm tra thất bại: ${resp?.error || "không rõ lỗi"}`;
+      await refreshDebugStatus();
+      return;
+    }
+    await refreshDebugStatus();
+  });
+});
+
+btnRefreshDebug.addEventListener("click", () => {
+  void refreshDebugStatus();
+});
+
+btnCaptureNow.addEventListener("click", () => {
+  ext.runtime.sendMessage({ type: "MEMORYFEED_CAPTURE_ACTIVE_TAB" }, async (resp) => {
+    if (chrome.runtime.lastError) {
+      debugBox.textContent = `Lỗi runtime: ${chrome.runtime.lastError.message}`;
+      return;
+    }
+    if (!resp?.ok) {
+      debugBox.textContent = `Ghi tab thất bại: ${resp?.error || "không rõ lỗi"}`;
+      await refreshDebugStatus();
+      return;
+    }
+    debugBox.textContent = "Đã gửi dữ liệu tab hiện tại lên backend.";
+    await refreshDebugStatus();
+  });
+});
+
+btnGrantTikTok.addEventListener("click", () => {
+  if (!ext.permissions || !ext.permissions.request) {
+    debugBox.textContent = "Trình duyệt không hỗ trợ permissions.request.";
+    return;
+  }
+  ext.permissions.request(
+    {
+      origins: [
+        "https://www.tiktok.com/*",
+        "https://tiktok.com/*",
+        "https://m.tiktok.com/*",
+        "https://*.tiktok.com/*",
+      ],
+    },
+    (granted) => {
+      if (chrome.runtime.lastError) {
+        debugBox.textContent = `Lỗi phân quyền: ${chrome.runtime.lastError.message}`;
+        return;
+      }
+      debugBox.textContent = granted
+        ? "Đã cấp quyền TikTok. Tải lại tab TikTok rồi thử lại."
+        : "Bạn chưa cấp quyền TikTok.";
+    }
+  );
+});
+
+void refreshDebugStatus();

@@ -9,6 +9,10 @@
     .wrap { padding: 12px; }
     input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; }
     .muted { color: #64748b; font-size: 12px; margin-top: 8px; }
+    .debug { color: #334155; font-size: 12px; margin-top: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; white-space: pre-wrap; }
+    .row { display: flex; gap: 8px; margin-top: 8px; }
+    button { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 7px 10px; font-size: 12px; cursor: pointer; }
+    button:hover { border-color: #3b82f6; }
     .item { display: block; text-decoration: none; color: #0f172a; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; margin-top: 8px; }
     .item:hover { border-color: #3b82f6; }
     .meta { font-size: 12px; color: #64748b; margin-bottom: 6px; }
@@ -18,7 +22,14 @@
 <body>
   <div class="wrap">
     <input id="q" type="text" placeholder="Tìm: meme mèo giận..." autocomplete="off" />
-    <div class="muted" id="status">Nhập từ khóa để tìm trong MemoryFeed local.</div>
+    <div class="muted" id="status">Nhập từ khóa để tìm trong MemoryFeed cục bộ.</div>
+    <div class="row">
+      <button id="btnSelfTest" type="button">Kiểm tra kết nối</button>
+      <button id="btnCaptureNow" type="button">Ghi tab hiện tại</button>
+      <button id="btnGrantTikTok" type="button">Cấp quyền TikTok</button>
+      <button id="btnRefreshDebug" type="button">Làm mới trạng thái</button>
+    </div>
+    <div class="debug" id="debugBox">Chưa có log.</div>
     <div id="results"></div>
   </div>
   <script src="popup.js"></script>

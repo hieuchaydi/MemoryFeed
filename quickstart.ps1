@@ -3,33 +3,49 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
-Write-Host "[1/6] Checking prerequisites..." -ForegroundColor Cyan
+if (Test-Path ".env") {
+  Get-Content ".env" | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#")) { return }
+    $parts = $line -split "=", 2
+    if ($parts.Count -eq 2) {
+      $k = $parts[0].Trim()
+      $v = $parts[1].Trim().Trim('"').Trim("'")
+      if ($k) {
+        [Environment]::SetEnvironmentVariable($k, $v, "Process")
+      }
+    }
+  }
+}
+
+Write-Host "[1/5] Checking prerequisites..." -ForegroundColor Cyan
 python --version | Out-Null
 npm -v | Out-Null
-ollama --version | Out-Null
 
-Write-Host "[2/6] Checking Ollama server..." -ForegroundColor Cyan
-try {
-  Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -Method Get | Out-Null
-} catch {
-  Write-Host "Ollama server is not reachable at http://localhost:11434" -ForegroundColor Red
-  Write-Host "Start it first with: ollama serve" -ForegroundColor Yellow
+if (-not $env:GEMINI_API_KEY) {
+  Write-Host "Missing GEMINI_API_KEY" -ForegroundColor Red
+  Write-Host 'Set it first: $env:GEMINI_API_KEY = "your_key"' -ForegroundColor Yellow
   exit 1
 }
 
-Write-Host "[3/6] Installing Python package..." -ForegroundColor Cyan
+if (-not $env:GROQ_API_KEY) {
+  Write-Host "Missing GROQ_API_KEY" -ForegroundColor Red
+  Write-Host 'Set it first: $env:GROQ_API_KEY = "your_key"' -ForegroundColor Yellow
+  exit 1
+}
+
+Write-Host "[2/5] Installing Python package..." -ForegroundColor Cyan
 python -m pip install -e .
 
-Write-Host "[4/6] Installing frontend dependencies..." -ForegroundColor Cyan
+Write-Host "[3/5] Installing frontend dependencies..." -ForegroundColor Cyan
 Push-Location frontend
 npm install
 Pop-Location
 
-Write-Host "[5/6] Ensuring local models..." -ForegroundColor Cyan
-ollama pull qwen2.5:7b
-ollama pull llava:7b
+Write-Host "[4/5] Checking LLM providers..." -ForegroundColor Cyan
+memoryfeed models
 
-Write-Host "[6/6] Starting services..." -ForegroundColor Cyan
+Write-Host "[5/5] Starting services..." -ForegroundColor Cyan
 $backend = Start-Process -FilePath "cmd.exe" -ArgumentList "/c memoryfeed serve" -PassThru -WindowStyle Hidden
 $frontend = Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$root\frontend`" && npm run dev -- --host 127.0.0.1 --port 5173" -PassThru -WindowStyle Hidden
 

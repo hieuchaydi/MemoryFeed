@@ -15,6 +15,13 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from backend.indexer import IndexerService
+from backend.llm_clients import (
+    GROQ_MODEL,
+    GEMINI_MODEL,
+    check_gemini_connectivity,
+    check_groq_connectivity,
+    providers_snapshot,
+)
 from backend.native_accel import status as native_status
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, Store
@@ -231,23 +238,32 @@ def reset() -> None:
 
 @cli.command()
 def models() -> None:
-    """Check ollama models availability."""
-    try:
-        resp = httpx.get("http://localhost:11434/api/tags", timeout=5.0)
-        resp.raise_for_status()
-    except Exception as exc:
-        console.print(f"[red]Cannot connect to Ollama:[/red] {exc}")
-        sys.exit(1)
+    """Check Gemini + Groq provider connectivity."""
+    snapshot = providers_snapshot()
+    gemini_ok, gemini_reason = check_gemini_connectivity(timeout_s=6.0)
+    groq_ok, groq_reason = check_groq_connectivity(timeout_s=6.0)
 
-    data = resp.json()
-    names = [m.get("name", "") for m in data.get("models", [])]
-    required = ["qwen2.5:7b", "llava:7b"]
-
-    table = Table(title="Ollama Models")
+    table = Table(title="LLM Providers")
+    table.add_column("Provider")
     table.add_column("Model")
-    table.add_column("Installed")
-    for model in required:
-        table.add_row(model, "yes" if any(name.startswith(model) for name in names) else "no")
+    table.add_column("Configured")
+    table.add_column("Reachable")
+    table.add_column("Details")
+
+    table.add_row(
+        "Gemini",
+        GEMINI_MODEL,
+        "yes" if snapshot["gemini"]["enabled"] else "no",
+        "yes" if gemini_ok else "no",
+        gemini_reason,
+    )
+    table.add_row(
+        "Groq (Qwen)",
+        GROQ_MODEL,
+        "yes" if snapshot["groq"]["enabled"] else "no",
+        "yes" if groq_ok else "no",
+        groq_reason,
+    )
     console.print(table)
 
 

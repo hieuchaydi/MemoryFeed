@@ -4,12 +4,10 @@ import asyncio
 import logging
 from dataclasses import asdict, dataclass
 from datetime import date
-from pathlib import Path
 from typing import Any
 
-import httpx
-
 from backend.indexer import IndexerService
+from backend.llm_clients import check_gemini_connectivity, check_groq_connectivity, providers_snapshot
 from backend.logging_setup import configure_logging
 from backend.native_accel import status as native_status
 from backend.searcher import Searcher
@@ -65,7 +63,7 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
             "backend": "Python + FastAPI",
             "frontend": "React + Vite + TypeScript",
             "database": ["SQLite (FTS5 + WAL)", "LanceDB"],
-            "ai": ["sentence-transformers", "Ollama (qwen2.5:7b, llava:7b)"],
+            "ai": ["sentence-transformers", "Gemini API", "Groq API (Qwen)"],
             "extension": ["Chrome/Edge/Brave", "Firefox"],
             "optional_native": "C++ via pybind11",
         }
@@ -106,20 +104,26 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 )
             )
 
-        ollama_ok = False
-        try:
-            resp = httpx.get("http://localhost:11434/api/tags", timeout=2.0)
-            ollama_ok = resp.status_code == 200
-        except Exception:
-            ollama_ok = False
+        gemini_ok, gemini_reason = check_gemini_connectivity(timeout_s=4.0)
+        groq_ok, groq_reason = check_groq_connectivity(timeout_s=4.0)
 
-        if not ollama_ok:
+        if not gemini_ok:
             issues.append(
                 HealthIssue(
-                    type="ollama_unreachable",
+                    type="gemini_unavailable",
                     severity="medium",
-                    message="Ollama is unreachable at http://localhost:11434.",
-                    suggested_fix="Start Ollama with `ollama serve`.",
+                    message=f"Gemini unavailable: {gemini_reason}",
+                    suggested_fix="Set valid GEMINI_API_KEY and verify network egress.",
+                )
+            )
+
+        if not groq_ok:
+            issues.append(
+                HealthIssue(
+                    type="groq_unavailable",
+                    severity="medium",
+                    message=f"Groq unavailable: {groq_reason}",
+                    suggested_fix="Set valid GROQ_API_KEY and verify Groq API access.",
                 )
             )
 
@@ -152,7 +156,9 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 "today": stats.get("today", 0),
                 "total": stats.get("total", 0),
                 "native": native_status(),
-                "ollama_ok": ollama_ok,
+                "providers": providers_snapshot(),
+                "gemini_ok": gemini_ok,
+                "groq_ok": groq_ok,
                 "runtime_perf": searcher.perf_stats(),
             },
             "suggested_next_steps": next_steps,

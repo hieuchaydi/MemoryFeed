@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 
-Platform = Literal["facebook", "twitter", "youtube", "linkedin", "instagram", "unknown"]
+Platform = Literal["facebook", "twitter", "youtube", "linkedin", "instagram", "tiktok", "unknown"]
 ContentType = Literal["post", "video", "image", "article"]
 
 

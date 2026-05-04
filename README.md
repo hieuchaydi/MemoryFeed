@@ -7,7 +7,8 @@ MemoryFeed is a local-first social memory system:
 - Browser extension captures social posts after 3s dwell.
 - FastAPI backend stores content in SQLite (WAL) + FTS5.
 - LanceDB stores semantic vectors for multilingual search.
-- Vision pipeline (Ollama `llava:7b`) captions images/memes asynchronously.
+- Vision pipeline (Gemini) captions images/memes asynchronously.
+- Text rewrite/summarization uses Groq with Qwen.
 - React + Vite + TypeScript frontend is the main operator console.
 - Optional C++ native acceleration speeds critical ranking/text ops.
 - Item metadata management (star/note/tags), export/import, and queue observability.
@@ -60,6 +61,7 @@ Available MCP tools:
 - `detect_stack`
 - `check_project_health`
 - `get_memoryfeed_stats`
+- `get_runtime_perf`
 - `search_memory`
 - `timeline_memories`
 
@@ -67,10 +69,8 @@ Available MCP tools:
 
 - Python 3.12+
 - Node.js 20+
-- Ollama running on `http://localhost:11434`
-- Models:
-  - `qwen2.5:7b`
-  - `llava:7b`
+- `GEMINI_API_KEY` (vision + multimodal understanding)
+- `GROQ_API_KEY` (Qwen text model via Groq)
 
 Optional for C++ acceleration:
 
@@ -93,7 +93,7 @@ bash quickstart.sh
 
 This will:
 - install Python package + frontend deps
-- check Ollama and pull required models
+- validate Gemini + Groq provider connectivity
 - start backend (`:7749`) and frontend (`:5173`)
 - auto-open browser
 
@@ -131,9 +131,9 @@ memoryfeed mcp --transport stdio
 
 ### Quickstart Demo (GIF)
 
-![Quickstart Demo](docs/assets/quickstart-demo.gif)
+![Quickstart Demo](docs-react/public/assets/quickstart-demo.gif)
 
-Download/open directly: `docs/assets/quickstart-demo.gif`
+Download/open directly: `docs-react/public/assets/quickstart-demo.gif`
 
 ## Public Web Deploy (React + Vite)
 
@@ -169,6 +169,27 @@ Optional custom host/port:
 ```bash
 HOST=0.0.0.0 PORT=8080 bash deploy_web.sh
 ```
+
+## Docs React (Separate Deploy)
+
+All React documentation assets/pages are now under `docs-react/`.
+
+```bash
+cd docs-react
+npm install
+npm run build
+```
+
+Deploy output folder: `docs-react/dist`
+
+Vercel settings (important):
+- Framework Preset: `Vite`
+- Root Directory: `docs-react`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+Detailed deploy notes: `docs-react/content/DEPLOY.md`
 
 ## Manual Setup
 
@@ -234,6 +255,7 @@ If native build fails, project continues with Python fallback.
 - `GET /api/stats`
 - `GET /api/native/status`
 - `GET /api/queues/status`
+- `GET /api/perf` (search/indexer cache + queue diagnostics)
 - `GET /api/items?limit=&offset=&platform=&starred_only=`
 - `PATCH /api/items/{id}` (update `starred`, `note`, `tags`)
 - `POST /api/admin/export`
@@ -250,10 +272,12 @@ memoryfeed serve-web --host 0.0.0.0 --port 7749
 memoryfeed mcp --transport stdio
 memoryfeed timeline
 memoryfeed stats
+memoryfeed perf
 memoryfeed items --starred
 memoryfeed export
 memoryfeed import --file ~/.memoryfeed/exports/memoryfeed-export-YYYY-MM-DD.json
 memoryfeed models
+memoryfeed perf
 memoryfeed build-native
 memoryfeed build-frontend
 memoryfeed reset
@@ -276,10 +300,16 @@ Environment variables:
 - `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`
 - `MEMORYFEED_LOG_FORMAT=plain|json`
 - `MEMORYFEED_LOG_FILE=/custom/path/memoryfeed.log`
+- `GEMINI_API_KEY=...`
+- `GROQ_API_KEY=...`
+- `MEMORYFEED_GEMINI_MODEL=gemini-2.5-flash` (optional)
+- `MEMORYFEED_GROQ_MODEL=qwen/qwen3-32b` (optional)
 
 ## Notes
 
 - `/capture` is non-blocking: vision + embedding run in background queues.
+- Search includes short-TTL response cache with automatic invalidation on new captures.
+- Semantic query vectors use in-memory cache to reduce repeated model encodes.
 - Dedupe key = URL + first 100 chars of text.
-- If Ollama is down, text capture still works.
+- If Gemini/Groq is unavailable, text capture still works and processing degrades gracefully.
 - Image captions are skipped gracefully when download/model fails.

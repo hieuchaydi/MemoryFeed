@@ -1,25 +1,25 @@
 ﻿from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from backend.indexer import IndexerService
+from backend.llm_clients import caption_image_with_gemini, rewrite_or_summarize_with_groq
 from backend.store import IMAGE_CACHE_DIR, Store
 
 logger = logging.getLogger(__name__)
-OLLAMA_URL = "http://localhost:11434/api/generate"
-VISION_MODEL = "llava:7b"
 VISION_PROMPT = (
-    "Describe this image in detail. If it's a meme, describe the text and humor. "
-    "If it's a photo, describe what's happening. Be specific. "
-    "Answer in the same language as any text in the image."
+    "Hãy mô tả chi tiết ảnh này. Nếu là meme, nêu rõ chữ trong ảnh và ý gây cười. "
+    "Nếu là ảnh chụp, mô tả bối cảnh và hành động chính thật cụ thể. "
+    "Giữ nguyên ngôn ngữ đang xuất hiện trong ảnh; nếu không có chữ thì trả lời bằng tiếng Việt."
 )
+ENABLE_GROQ_CAPTION_REWRITE = os.getenv("MEMORYFEED_GROQ_REWRITE_CAPTIONS", "1") not in {"0", "false", "False"}
 
 
 class VisionService:
@@ -86,7 +86,7 @@ class VisionService:
                 if not cached:
                     continue
                 cache_paths.append(str(cached))
-                caption = await self._caption_image(client, cached)
+                caption = await self._caption_image(cached)
                 if caption:
                     captions.append(caption)
 
@@ -109,27 +109,24 @@ class VisionService:
             logger.debug("Failed to download image %s: %s", image_url, exc)
             return None
 
-    async def _caption_image(self, client: httpx.AsyncClient, image_path: Path) -> str:
+    async def _caption_image(self, image_path: Path) -> str:
         try:
-            img_b64 = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+            image_bytes = image_path.read_bytes()
         except Exception as exc:
             logger.debug("Cannot read cached image %s: %s", image_path, exc)
             return ""
 
-        payload = {
-            "model": VISION_MODEL,
-            "prompt": VISION_PROMPT,
-            "images": [img_b64],
-            "stream": False,
-        }
-        try:
-            resp = await client.post(OLLAMA_URL, json=payload, timeout=120.0)
-            resp.raise_for_status()
-            body = resp.json()
-            return str(body.get("response", "")).strip()
-        except Exception as exc:
-            logger.debug("Vision model unavailable or failed for %s: %s", image_path, exc)
+        caption = await asyncio.to_thread(caption_image_with_gemini, image_bytes, VISION_PROMPT)
+        if not caption:
+            logger.debug("Gemini caption unavailable for %s", image_path)
             return ""
+
+        if ENABLE_GROQ_CAPTION_REWRITE:
+            rewritten = await asyncio.to_thread(rewrite_or_summarize_with_groq, caption)
+            if rewritten:
+                caption = rewritten
+
+        return caption
 
     def status(self) -> dict[str, int | bool]:
         return {

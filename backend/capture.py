@@ -22,6 +22,9 @@ PLATFORM_FROM_HOST = {
     "www.linkedin.com": "linkedin",
     "instagram.com": "instagram",
     "www.instagram.com": "instagram",
+    "tiktok.com": "tiktok",
+    "www.tiktok.com": "tiktok",
+    "m.tiktok.com": "tiktok",
 }
 
 
@@ -52,8 +55,17 @@ def detect_content_type(url: str, image_urls: list[str]) -> str:
     return "post"
 
 
-def make_dedupe_key(url: str, text: str) -> str:
-    seed = f"{url}|{text[:100]}".encode("utf-8", errors="ignore")
+def make_dedupe_key(
+    url: str,
+    text: str,
+    platform: str = "unknown",
+    author: str | None = None,
+    image_urls: list[str] | None = None,
+) -> str:
+    first_image = ""
+    if image_urls:
+        first_image = image_urls[0]
+    seed = f"{url}|{platform}|{text[:140]}|{(author or '')[:80]}|{first_image}".encode("utf-8", errors="ignore")
     return hashlib.sha256(seed).hexdigest()
 
 
@@ -78,6 +90,12 @@ def normalize_capture(payload: CaptureRequest) -> dict:
         "embedding_done": 0,
         "vision_done": 0 if image_urls else 1,
         "image_cache_paths": [],
-        "dedupe_key": make_dedupe_key(payload.url.strip(), text),
+        "dedupe_key": make_dedupe_key(
+            payload.url.strip(),
+            text,
+            platform=platform,
+            author=payload.author,
+            image_urls=image_urls,
+        ),
     }
     return normalized

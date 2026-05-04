@@ -4,6 +4,7 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.env
 
 # Data
 .memoryfeed/
@@ -19,6 +20,8 @@ native/*.lib
 # Frontend
 frontend/node_modules/
 frontend/dist/
+docs-react/node_modules/
+docs-react/dist/
 
 # IDE
 .vscode/
