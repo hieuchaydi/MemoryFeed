@@ -12,6 +12,7 @@ MemoryFeed is a local-first social memory system:
 - React + Vite + TypeScript frontend is the main operator console.
 - Optional C++ native acceleration speeds critical ranking/text ops.
 - Item metadata management (star/note/tags), export/import, and queue observability.
+- Active Feed ranks memories by personal heat, decay, resurfacing gap, and current context.
 
 No cloud, no API key, no data leaves your machine.
 
@@ -20,7 +21,7 @@ No cloud, no API key, no data leaves your machine.
 - `extension/chrome`: Chromium extension (Chrome/Edge/Brave).
 - `extension/firefox`: Firefox extension package.
 - `backend`: capture normalization, store, indexing, search, server.
-- `frontend`: React app (Search / Timeline / Stats).
+- `frontend`: React app (Search / Active Feed / Timeline / Stats).
 - `native`: pybind11 C++ module (`memoryfeed_native`) for acceleration.
 
 ## Web App (React + TypeScript)
@@ -30,6 +31,7 @@ Frontend stack:
 - Vite 8
 - TypeScript (strict mode)
 - React Query + React Router
+- Minimal responsive UI with light/dark theme and VI/EN language switch
 
 Commands:
 
@@ -64,6 +66,8 @@ Available MCP tools:
 - `get_runtime_perf`
 - `search_memory`
 - `timeline_memories`
+- `active_memory_feed`
+- `resurface_memory_context`
 
 ## Requirements
 
@@ -173,6 +177,7 @@ HOST=0.0.0.0 PORT=8080 bash deploy_web.sh
 ## Docs React (Separate Deploy)
 
 All React documentation assets/pages are now under `docs-react/`.
+The standalone docs cover overview, quickstart, architecture, Active Feed, API, CLI, MCP, extension loading, storage/privacy, and Vercel deploy.
 
 ```bash
 cd docs-react
@@ -251,6 +256,10 @@ If native build fails, project continues with Python fallback.
 
 - `POST /capture` and `POST /api/capture`
 - `GET /api/search`
+- `GET /api/feed?limit=&mode=default|focus|light|explore`
+- `POST /api/resurface`
+- `POST /api/feed/surfaced`
+- `POST /api/feed/archive`
 - `GET /api/timeline`
 - `GET /api/stats`
 - `GET /api/native/status`
@@ -271,6 +280,8 @@ memoryfeed search "that angry cat meme last week"
 memoryfeed serve-web --host 0.0.0.0 --port 7749
 memoryfeed mcp --transport stdio
 memoryfeed timeline
+memoryfeed feed --mode focus
+memoryfeed resurface "Docker networking CNI overlay Cilium"
 memoryfeed stats
 memoryfeed perf
 memoryfeed items --starred
@@ -310,6 +321,8 @@ Environment variables:
 - `/capture` is non-blocking: vision + embedding run in background queues.
 - Search includes short-TTL response cache with automatic invalidation on new captures.
 - Semantic query vectors use in-memory cache to reduce repeated model encodes.
+- Memories have `heat`: related captures warm old memories, daily decay cools idle memories, and `/api/feed` surfaces the highest-value items.
+- `/api/resurface` is the ambient integration hook for VS Code/Raycast/Obsidian/browser context suggestions.
 - Dedupe key = URL + first 100 chars of text.
 - If Gemini/Groq is unavailable, text capture still works and processing degrades gracefully.
 - Image captions are skipped gracefully when download/model fails.

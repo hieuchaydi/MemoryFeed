@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchNativeStatus, fetchStats, patchItem, searchFeed } from "../api/client";
 import ResultCard from "../components/ResultCard";
+import { useSettings } from "../settings";
 import type { FeedItem } from "../types";
 
 function useDebounced(value: string, ms = 280): string {
@@ -15,6 +16,7 @@ function useDebounced(value: string, ms = 280): string {
 }
 
 export default function SearchPage() {
+  const { t } = useSettings();
   const [query, setQuery] = useState("");
   const [daysBack, setDaysBack] = useState("30");
   const [starredOnly, setStarredOnly] = useState(false);
@@ -44,53 +46,54 @@ export default function SearchPage() {
   return (
     <section className="page">
       <div className="hero-panel">
-        <h1>MemoryFeed Console</h1>
+        <h1>{t.search.title}</h1>
         <p>
-          Truy van tu nhien: <code>meme meo gian tuan truoc</code> hoac <code>startup culture failure</code>.
+          {t.search.description} <span className="muted-label">{t.search.examples}:</span>{" "}
+          <code>meme mèo giận tuần trước</code> <code>startup culture failure</code>
         </p>
 
         <div className="query-grid">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Nhap cau truy van..."
+            placeholder={t.search.placeholder}
             className="query-input"
           />
           <select value={daysBack} onChange={(e) => setDaysBack(e.target.value)} className="days-select">
-            <option value="">Tat ca thoi gian</option>
-            <option value="7">7 ngay</option>
-            <option value="30">30 ngay</option>
-            <option value="90">90 ngay</option>
+            <option value="">{t.search.allTime}</option>
+            <option value="7">{t.search.sevenDays}</option>
+            <option value="30">{t.search.thirtyDays}</option>
+            <option value="90">{t.search.ninetyDays}</option>
           </select>
         </div>
 
         <div className="status-grid">
           <div className="status-card">
-            <span>Total captures</span>
+            <span>{t.search.total}</span>
             <b>{statsQ.data?.total ?? "..."}</b>
           </div>
           <div className="status-card">
-            <span>Today</span>
+            <span>{t.search.today}</span>
             <b>{statsQ.data?.today ?? "..."}</b>
           </div>
           <div className="status-card">
-            <span>Native accel</span>
-            <b className={nativeQ.data?.enabled ? "ok" : "warn"}>{nativeQ.data?.enabled ? "enabled" : "python"}</b>
+            <span>{t.search.native}</span>
+            <b className={nativeQ.data?.enabled ? "ok" : "warn"}>{nativeQ.data?.enabled ? t.search.enabled : t.search.python}</b>
           </div>
         </div>
 
         <label className="toggle-row">
           <input type="checkbox" checked={starredOnly} onChange={(e) => setStarredOnly(e.target.checked)} />
-          <span>Chi hien thi muc da danh dau sao</span>
+          <span>{t.search.starredOnly}</span>
         </label>
       </div>
 
       <div className="results-wrap">
-        {searchQ.isFetching ? <div className="state">Dang tim...</div> : null}
+        {searchQ.isFetching ? <div className="state">{t.search.searching}</div> : null}
         {!searchQ.isFetching && debounced.trim().length > 0 && results.length === 0 ? (
-          <div className="state">Khong tim thay ket qua.</div>
+          <div className="state">{t.search.empty}</div>
         ) : null}
-        {!debounced.trim().length ? <div className="state">Nhap tu khoa de bat dau.</div> : null}
+        {!debounced.trim().length ? <div className="state">{t.search.idle}</div> : null}
 
         <div className="result-list">
           {results.map((item: FeedItem) => (

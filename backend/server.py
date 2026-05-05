@@ -17,8 +17,17 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.capture import normalize_capture
 from backend.indexer import IndexerService
+from backend.interest import InterestEngine
 from backend.logging_setup import configure_logging
-from backend.models import CaptureRequest, CaptureResponse, ImportPayload, ItemMetaPatch
+from backend.models import (
+    ArchiveItemsRequest,
+    CaptureRequest,
+    CaptureResponse,
+    ImportPayload,
+    ItemMetaPatch,
+    ResurfaceRequest,
+    SurfaceItemsRequest,
+)
 from backend.native_accel import status as native_status
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, IMAGE_CACHE_DIR, Store
@@ -52,6 +61,7 @@ store = Store()
 indexer = IndexerService(store)
 vision = VisionService(store, indexer)
 searcher = Searcher(store, indexer)
+interest = InterestEngine(store, searcher)
 
 if IMAGE_CACHE_DIR.exists():
     app.mount("/images", StaticFiles(directory=str(IMAGE_CACHE_DIR)), name="images")
@@ -116,8 +126,16 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
     else:
         await indexer.enqueue(item["id"])
     searcher.bump_data_epoch()
+    asyncio.create_task(_warm_related_memories(item["id"]))
     logger.info("capture stored id=%s platform=%s", item["id"], item.get("platform"))
     return CaptureResponse(status="stored", id=item["id"])
+
+
+async def _warm_related_memories(item_id: str) -> None:
+    try:
+        await interest.warm_related_for_item(item_id)
+    except Exception:
+        logger.exception("interest warm failed item_id=%s", item_id)
 
 
 @app.get("/api/search")
@@ -138,6 +156,39 @@ async def timeline_api(
     selected_date = date_str or date.today().isoformat()
     items = await asyncio.to_thread(store.all_for_timeline, selected_date, platform)
     return {"date": selected_date, "platform": platform, "count": len(items), "items": items}
+
+
+@app.get("/api/feed")
+async def active_feed_api(
+    limit: int = Query(default=20, ge=1, le=100),
+    mode: str = Query(default="default", pattern="^(default|focus|light|explore)$"),
+) -> dict[str, Any]:
+    items = await interest.active_feed(limit=limit, mode=mode)
+    return {"mode": mode, "count": len(items), "items": items}
+
+
+@app.post("/api/resurface")
+async def resurface_context_api(payload: ResurfaceRequest) -> dict[str, Any]:
+    items = await interest.resurface_context(
+        context=payload.context,
+        limit=payload.limit,
+        source_item_id=payload.source_item_id,
+        bump_heat=payload.bump_heat,
+    )
+    return {"count": len(items), "items": items}
+
+
+@app.post("/api/feed/surfaced")
+async def mark_surfaced_api(payload: SurfaceItemsRequest) -> dict[str, Any]:
+    count = await interest.mark_surfaced(payload.item_ids)
+    return {"ok": True, "updated": count}
+
+
+@app.post("/api/feed/archive")
+async def archive_feed_items_api(payload: ArchiveItemsRequest) -> dict[str, Any]:
+    count = await interest.archive(payload.item_ids)
+    searcher.bump_data_epoch()
+    return {"ok": True, "updated": count}
 
 
 @app.get("/api/stats")
@@ -270,7 +321,7 @@ async def frontend_spa(full_path: str) -> Any:
     return {
         "message": "Frontend not built yet",
         "hint": "Run: cd frontend && npm run build",
-        "api": ["/api/search", "/api/timeline", "/api/stats", "/api/native/status", "/api/perf"],
+        "api": ["/api/search", "/api/feed", "/api/resurface", "/api/timeline", "/api/stats", "/api/native/status", "/api/perf"],
     }
 
 

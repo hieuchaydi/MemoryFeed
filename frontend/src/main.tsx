@@ -4,9 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import App from "./App";
+import FeedPage from "./pages/FeedPage";
 import SearchPage from "./pages/SearchPage";
 import TimelinePage from "./pages/TimelinePage";
 import StatsPage from "./pages/StatsPage";
+import { SettingsProvider } from "./settings";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -26,17 +28,20 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<App />}>
-            <Route index element={<SearchPage />} />
-            <Route path="timeline" element={<TimelinePage />} />
-            <Route path="stats" element={<StatsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <SettingsProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<App />}>
+              <Route index element={<SearchPage />} />
+              <Route path="feed" element={<FeedPage />} />
+              <Route path="timeline" element={<TimelinePage />} />
+              <Route path="stats" element={<StatsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </SettingsProvider>
   </StrictMode>
 );

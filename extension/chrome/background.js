@@ -165,6 +165,20 @@ async function captureActiveTabNow() {
       let contentType = "post";
 
       if (platform === "tiktok") {
+        const directVideoLink =
+          document.querySelector('a[href*="/video/"]')?.href ||
+          Array.from(document.querySelectorAll('a[href*="/video/"]'))
+            .map((a) => a.href)
+            .find(Boolean) ||
+          "";
+        const ogUrl = safeText(document.querySelector('meta[property="og:url"]')?.content);
+        const canonical = safeText(document.querySelector('link[rel="canonical"]')?.href);
+        const videoUrl =
+          directVideoLink ||
+          (location.href.includes("/video/") ? location.href : "") ||
+          (ogUrl.includes("/video/") ? ogUrl : "") ||
+          (canonical.includes("/video/") ? canonical : "");
+
         text =
           safeText(
             document.querySelector('[data-e2e="new-desc-span"], [data-e2e="video-desc"], [data-e2e="browse-video-desc"]')
@@ -202,7 +216,12 @@ async function captureActiveTabNow() {
       }
 
       return {
-        url: location.href,
+        url:
+          platform === "tiktok"
+            ? document.querySelector('a[href*="/video/"]')?.href ||
+              safeText(document.querySelector('meta[property="og:url"]')?.content) ||
+              location.href
+            : location.href,
         platform,
         content_type: contentType,
         text_content: text || "",

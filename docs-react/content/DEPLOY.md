@@ -1,36 +1,44 @@
-# Standalone Deploy Checklist (Vercel)
+﻿# Standalone Deploy Checklist (Vercel)
 
-This file assumes `docs-react` is already a standalone repo root.
+Tài liệu này dùng cho `docs-react/`, dù folder còn nằm trong monorepo hay đã tách thành repo riêng.
 
-## Required Vercel Configuration
+## Deploy từ monorepo hiện tại
+
+1. Framework Preset: `Vite`
+2. Root Directory: `docs-react`
+3. Build Command: `npm run build`
+4. Output Directory: `dist`
+5. Install Command: `npm install`
+6. Node.js: `20.x` hoặc mới hơn
+
+## Deploy sau khi tách thành repo riêng
 
 1. Framework Preset: `Vite`
 2. Root Directory: `./`
 3. Build Command: `npm run build`
 4. Output Directory: `dist`
 5. Install Command: `npm install`
-6. Node.js: `20.x` or newer
+6. Node.js: `20.x` hoặc mới hơn
 
-## Local Validation Before Push
+## Validate local trước khi push
 
 ```bash
 npm install
 npm run build
+npm run preview
 ```
 
-If build succeeds locally, Vercel should pass with the same commands.
+## Vì sao build script gọi Vite qua Node
 
-## Why Build Script Uses Node Directly
-
-`package.json` build script is:
+`package.json` dùng:
 
 ```bash
 node ./node_modules/vite/bin/vite.js build
 ```
 
-This avoids Linux executable permission issues on `.bin/vite`.
+Cách này tránh lỗi `node_modules/.bin/vite: Permission denied` trên Linux CI/Vercel.
 
-## Deployment Files That Must Exist
+## File bắt buộc
 
 - `package.json`
 - `package-lock.json`
@@ -39,18 +47,25 @@ This avoids Linux executable permission issues on `.bin/vite`.
 - `src/*`
 - `public/*`
 
-## Files That Must Not Be Committed
+## File không commit
 
 - `node_modules/`
 - `dist/`
 
-## Common Failures
+## Lỗi thường gặp
 
 ### `node_modules/.bin/vite: Permission denied`
-- Fixed by the direct-node build script above.
 
-### App deploys but refresh gives 404
-- Keep `rewrites` in `vercel.json`.
+Đã xử lý bằng build script gọi Vite qua `node`.
 
-### Assets missing
-- Keep all images/GIFs inside `public/`.
+### Refresh page bị 404
+
+Giữ cấu hình `rewrites` trong `vercel.json`.
+
+### Thiếu ảnh/GIF
+
+Đặt assets trong `public/`, ví dụ `public/assets/quickstart-demo.gif`.
+
+### Docs thiếu nội dung sau khi core app thay đổi
+
+Cập nhật `src/content/docsContent.ts`, rồi chạy `npm run build` để xác nhận.

@@ -33,12 +33,19 @@
   - `score = 1/(rank_fts + 60) + 1/(rank_sem + 60)`
 - Return compact card-ready results with thumbnail and excerpt.
 
-## 7) Frontend Direction
+## 7) Active Memory Strategy
+- Memories carry `heat`, `last_surfaced`, `surfaced_count`, and `archived_at`.
+- Daily decay cools memories that have not been surfaced recently.
+- Related new captures warm older memories through background hybrid retrieval.
+- `/api/feed` ranks by heat, recency, dwell, star state, resurfacing gap, and mode.
+- `/api/resurface` is the ambient integration contract for browser/VS Code/Raycast/MCP context.
+
+## 8) Frontend Direction
 - Use React + Vite as primary UX (not server-rendered templates).
 - API-first contract under `/api/*`.
 - FastAPI serves built SPA in production mode.
 
-## 8) Performance Direction
+## 9) Performance Direction
 - Default path: pure Python (portable).
 - Fast path: native C++ module (`memoryfeed_native`) when available.
 - Native module currently accelerates:
@@ -51,25 +58,25 @@
   - lower-lock insert path (`INSERT OR IGNORE`) for dedupe-heavy ingestion
 - Missing native module must never break runtime.
 
-## 9) Performance Observability
+## 10) Performance Observability
 - Add `/api/perf` endpoint for runtime diagnostics:
   - search cache hit/miss/eviction
   - search latency summary and last-stage timings
   - queue pressure and native status
 - Add CLI command `memoryfeed perf` for quick operator checks.
 
-## 10) Operability
+## 11) Operability
 - One-command startup scripts:
   - Windows: `quickstart.ps1`
   - Linux/macOS: `quickstart.sh`
 - CLI includes operational commands for serve, stats, model checks, frontend build, native build.
 
-## 11) Security & Privacy
+## 12) Security & Privacy
 - Outbound inference is allowed only to configured providers (Gemini/Groq).
 - No telemetry.
 - CORS limited to local frontend and browser extension origins.
 
-## 12) Deferred Decisions
+## 13) Deferred Decisions
 - Distributed multi-user mode: deferred.
 - Remote sync and multi-device replication: deferred.
 - GPU-specific native acceleration roadmap: deferred until baseline usage metrics.

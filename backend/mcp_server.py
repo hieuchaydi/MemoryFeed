@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from backend.indexer import IndexerService
+from backend.interest import InterestEngine
 from backend.llm_clients import check_gemini_connectivity, check_groq_connectivity, providers_snapshot
 from backend.logging_setup import configure_logging
 from backend.native_accel import status as native_status
@@ -33,11 +34,12 @@ class HealthIssue:
     suggested_fix: str
 
 
-def _create_services() -> tuple[Store, IndexerService, Searcher]:
+def _create_services() -> tuple[Store, IndexerService, Searcher, InterestEngine]:
     store = Store()
     indexer = IndexerService(store)
     searcher = Searcher(store, indexer)
-    return store, indexer, searcher
+    interest = InterestEngine(store, searcher)
+    return store, indexer, searcher, interest
 
 
 def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp"):
@@ -46,7 +48,7 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
             "MCP SDK not installed. Run: pip install \"mcp[cli]\""
         ) from _MCP_IMPORT_ERROR
 
-    store, indexer, searcher = _create_services()
+    store, indexer, searcher, interest = _create_services()
     logger.info("create_mcp_server host=%s port=%s path=%s", host, port, path)
     mcp = FastMCP(
         "MemoryFeed MCP",
@@ -179,6 +181,32 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
             "searcher": searcher.perf_stats(),
             "indexer": indexer.status(),
             "native": native_status(),
+        }
+
+    @mcp.tool(name="active_memory_feed")
+    async def active_memory_feed(limit: int = 10, mode: str = "default") -> dict[str, Any]:
+        """
+        Returns a proactive feed ranked by memory heat, recency, resurfacing gap, and mode.
+        """
+        safe_limit = max(1, min(limit, 50))
+        safe_mode = mode if mode in {"default", "focus", "light", "explore"} else "default"
+        items = await interest.active_feed(limit=safe_limit, mode=safe_mode)
+        return {
+            "mode": safe_mode,
+            "count": len(items),
+            "items": items,
+        }
+
+    @mcp.tool(name="resurface_memory_context")
+    async def resurface_memory_context(context: str, limit: int = 5, bump_heat: bool = True) -> dict[str, Any]:
+        """
+        Surfaces old memories related to the current work/read/write context.
+        """
+        safe_limit = max(1, min(limit, 20))
+        items = await interest.resurface_context(context=context, limit=safe_limit, bump_heat=bump_heat)
+        return {
+            "count": len(items),
+            "items": items,
         }
 
     @mcp.tool(name="search_memory")

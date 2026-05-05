@@ -87,3 +87,18 @@ class ItemMetaPatch(BaseModel):
 
 class ImportPayload(BaseModel):
     items: list[dict]
+
+
+class ResurfaceRequest(BaseModel):
+    context: str = Field(min_length=3, max_length=6000)
+    source_item_id: str | None = None
+    limit: int = Field(default=5, ge=1, le=20)
+    bump_heat: bool = True
+
+
+class SurfaceItemsRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ArchiveItemsRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list, max_length=100)

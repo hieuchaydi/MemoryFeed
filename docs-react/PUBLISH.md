@@ -1,8 +1,18 @@
-# Publish In 2 Minutes
+﻿# Publish Docs In 2 Minutes
 
-## 1) Push this folder as its own repo
+## 1. Nếu dùng monorepo hiện tại
 
-From inside this folder:
+Import repo hiện tại vào Vercel và dùng settings:
+
+- Framework Preset: `Vite`
+- Root Directory: `docs-react`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+## 2. Nếu muốn tách docs thành repo riêng
+
+Từ trong folder `docs-react/`:
 
 ```bash
 git init
@@ -13,22 +23,30 @@ git remote add origin <your-github-repo-url>
 git push -u origin master
 ```
 
-## 2) Import repo on Vercel
+Sau đó import repo mới vào Vercel và dùng settings:
 
-Use these exact values:
-
-- Application Preset: `Vite`
+- Framework Preset: `Vite`
 - Root Directory: `./`
 - Build Command: `npm run build`
 - Output Directory: `dist`
 - Install Command: `npm install`
 
-Then click Deploy.
+## 3. Nếu build fail với Vite permission issue
 
-## 3) If build fails with Vite permission issue
-
-Already handled by build script:
+Build script đã xử lý bằng:
 
 ```bash
 node ./node_modules/vite/bin/vite.js build
 ```
+
+## 4. Khi cập nhật MemoryFeed core
+
+Cần cập nhật lại `src/content/docsContent.ts` nếu thay đổi một trong các phần sau:
+
+- API endpoint.
+- CLI command.
+- MCP tool.
+- Active Feed/Interest Graph behavior.
+- Storage path hoặc env var.
+- Extension load flow.
+- Deploy flow.

@@ -1,8 +1,18 @@
-# MemoryFeed Docs (Standalone)
+﻿# MemoryFeed Docs React
 
-React + Vite docs site, ready to push as an independent repo and deploy on Vercel immediately.
+`docs-react/` là project tài liệu độc lập cho MemoryFeed. Nội dung đã bao gồm:
 
-## Quickstart
+- Tổng quan sản phẩm và kiến trúc.
+- Quickstart local/public web.
+- Active Feed, heat, decay, resurfacing và archive flow.
+- API endpoints đầy đủ.
+- CLI commands đầy đủ.
+- MCP tools cho Claude/Cursor/agents.
+- Browser extension load flow.
+- Storage, logging, privacy và provider env vars.
+- Deploy docs trên Vercel.
+
+## Chạy local
 
 ```bash
 npm install
@@ -17,37 +27,40 @@ Default URL: `http://localhost:4173`
 npm run build
 ```
 
-Output: `dist`
+Output: `dist/`
 
-## Vercel Settings (exact)
-
-Use these values in Vercel:
-
-1. `Application Preset`: `Vite`
-2. `Root Directory`: `./`
-3. `Build Command`: `npm run build`
-4. `Output Directory`: `dist`
-5. `Install Command`: `npm install`
-
-`vercel.json` is already included at repo root.
-
-## Lift This Folder Into Its Own Repo
-
-If this folder is still inside a monorepo, copy only `docs-react/` out, then:
+## Preview production build
 
 ```bash
-git init
-git add .
-git commit -m "init docs site"
-git branch -M master
-git remote add origin <your-repo-url>
-git push -u origin master
+npm run preview
 ```
 
-Then import that repo into Vercel and deploy.
+## Vercel settings
 
-## Common Issues
+Nếu deploy từ monorepo hiện tại:
 
-- `node_modules/.bin/vite: Permission denied`: handled by build script using `node ./node_modules/vite/bin/vite.js build`.
-- Build hangs at install: verify Vercel root is `./` for this standalone repo.
-- Refresh 404: keep `rewrites` in `vercel.json`.
+- Framework Preset: `Vite`
+- Root Directory: `docs-react`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+Nếu đã tách `docs-react/` thành repo riêng:
+
+- Framework Preset: `Vite`
+- Root Directory: `./`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+## Cập nhật nội dung
+
+- Nội dung chính nằm ở `src/content/docsContent.ts`.
+- Layout nằm ở `src/App.tsx`.
+- Theme/style nằm ở `src/styles.css`.
+- Assets public nằm ở `public/`.
+
+## Không commit
+
+- `node_modules/`
+- `dist/`

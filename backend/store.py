@@ -4,7 +4,8 @@ import json
 import sqlite3
 import threading
 import hashlib
-from datetime import datetime, timedelta, timezone
+import math
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,14 @@ class Store:
                     );
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    );
+                    """
+                )
 
                 conn.execute(
                     """
@@ -102,6 +111,12 @@ class Store:
                 self._ensure_column(conn, "items", "starred", "INTEGER DEFAULT 0")
                 self._ensure_column(conn, "items", "note", "TEXT")
                 self._ensure_column(conn, "items", "tags", "TEXT")
+                self._ensure_column(conn, "items", "heat", "REAL DEFAULT 1.0")
+                self._ensure_column(conn, "items", "last_surfaced", "TEXT")
+                self._ensure_column(conn, "items", "surfaced_count", "INTEGER DEFAULT 0")
+                self._ensure_column(conn, "items", "archived_at", "TEXT")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_heat ON items(heat);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_archived_at ON items(archived_at);")
                 conn.commit()
             finally:
                 conn.close()
@@ -124,8 +139,8 @@ class Store:
                         id, url, platform, content_type, text_content, image_urls,
                         image_captions, author, captured_at, dwell_seconds,
                         embedding_done, vision_done, dedupe_key, image_cache_paths,
-                        starred, note, tags
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        starred, note, tags, heat, last_surfaced, surfaced_count, archived_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"],
@@ -145,6 +160,10 @@ class Store:
                         int(bool(item.get("starred", 0))),
                         item.get("note"),
                         json.dumps(item.get("tags", []), ensure_ascii=False),
+                        float(item.get("heat", 1.0)),
+                        item.get("last_surfaced"),
+                        int(item.get("surfaced_count", 0) or 0),
+                        item.get("archived_at"),
                     ),
                 )
                 conn.commit()
@@ -172,6 +191,10 @@ class Store:
         out.setdefault("starred", 0)
         out.setdefault("note", None)
         out.setdefault("tags", [])
+        out.setdefault("heat", 1.0)
+        out.setdefault("last_surfaced", None)
+        out.setdefault("surfaced_count", 0)
+        out.setdefault("archived_at", None)
         out.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
         out.setdefault("content_type", "post")
         out.setdefault("platform", "unknown")
@@ -252,6 +275,141 @@ class Store:
             finally:
                 conn.close()
         return self.get_item(item_id)
+
+    def apply_heat_decay(self, decay: float = 0.95, idle_days: int = 7) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=idle_days)
+        today = date.today().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                last_decay = conn.execute(
+                    "SELECT value FROM meta WHERE key = 'last_heat_decay_date'"
+                ).fetchone()
+                if last_decay and last_decay["value"] == today:
+                    return 0
+
+                cur = conn.execute(
+                    """
+                    UPDATE items
+                    SET heat = MAX(0.05, COALESCE(heat, 1.0) * ?)
+                    WHERE archived_at IS NULL
+                      AND DATETIME(COALESCE(last_surfaced, captured_at)) < DATETIME(?)
+                    """,
+                    (float(decay), cutoff.isoformat()),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO meta(key, value)
+                    VALUES('last_heat_decay_date', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (today,),
+                )
+                conn.commit()
+                return int(cur.rowcount or 0)
+            finally:
+                conn.close()
+
+    def bump_heat(
+        self,
+        item_id: str,
+        amount: float = 0.35,
+        mark_surfaced: bool = False,
+        cap: float = 10.0,
+    ) -> dict[str, Any] | None:
+        updates = ["heat = MIN(?, COALESCE(heat, 1.0) + ?)"]
+        params: list[Any] = [float(cap), float(amount)]
+        if mark_surfaced:
+            updates.append("last_surfaced = ?")
+            updates.append("surfaced_count = COALESCE(surfaced_count, 0) + 1")
+            params.append(now_iso())
+        params.append(item_id)
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_item(item_id)
+
+    def mark_items_surfaced(self, item_ids: list[str]) -> int:
+        ids = [item_id for item_id in item_ids if item_id]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [now_iso(), *ids]
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    f"""
+                    UPDATE items
+                    SET last_surfaced = ?,
+                        surfaced_count = COALESCE(surfaced_count, 0) + 1,
+                        heat = MIN(10.0, COALESCE(heat, 1.0) + 0.05)
+                    WHERE id IN ({placeholders})
+                    """,
+                    params,
+                )
+                conn.commit()
+                return int(cur.rowcount or 0)
+            finally:
+                conn.close()
+
+    def archive_items(self, item_ids: list[str]) -> int:
+        ids = [item_id for item_id in item_ids if item_id]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [now_iso(), *ids]
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    f"UPDATE items SET archived_at = ? WHERE id IN ({placeholders})",
+                    params,
+                )
+                conn.commit()
+                return int(cur.rowcount or 0)
+            finally:
+                conn.close()
+
+    def smart_feed(self, limit: int = 20, mode: str = "default") -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM items
+                WHERE archived_at IS NULL
+                ORDER BY COALESCE(heat, 1.0) DESC, captured_at DESC
+                LIMIT ?
+                """,
+                (max(limit * 12, 120),),
+            ).fetchall()
+            items = [self._row_to_item(row) for row in rows]
+        finally:
+            conn.close()
+
+        ranked = []
+        for item in items:
+            if not item:
+                continue
+            surface_score, reason, needs_review = _feed_score(item, mode)
+            out = dict(item)
+            out["surface_score"] = round(surface_score, 6)
+            out["surface_reason"] = reason
+            out["needs_review"] = needs_review
+            out["text_excerpt"] = (out.get("text_content") or "").strip()[:220]
+            image_urls = out.get("image_urls") or []
+            cache_paths = out.get("image_cache_paths") or []
+            out["thumbnail"] = _normalize_thumbnail(cache_paths[0] if cache_paths else (image_urls[0] if image_urls else None))
+            ranked.append(out)
+
+        ranked.sort(key=lambda item: item["surface_score"], reverse=True)
+        return ranked[:limit]
 
     def search_fts(self, query: str, limit: int = 20, days_back: int | None = None) -> list[dict[str, Any]]:
         conn = self._connect()
@@ -440,6 +598,10 @@ class Store:
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
             "note": row["note"] if "note" in row.keys() else None,
             "tags": json.loads(row["tags"] or "[]") if "tags" in row.keys() and row["tags"] else [],
+            "heat": float(row["heat"]) if "heat" in row.keys() and row["heat"] is not None else 1.0,
+            "last_surfaced": row["last_surfaced"] if "last_surfaced" in row.keys() else None,
+            "surfaced_count": int(row["surfaced_count"] or 0) if "surfaced_count" in row.keys() else 0,
+            "archived_at": row["archived_at"] if "archived_at" in row.keys() else None,
         }
 
     @staticmethod
@@ -457,8 +619,75 @@ class Store:
             "captured_at": row["captured_at"],
             "fts_score": float(row[bm25_key]),
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
+            "heat": float(row["heat"]) if "heat" in row.keys() and row["heat"] is not None else 1.0,
         }
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _feed_score(item: dict[str, Any], mode: str) -> tuple[float, str, bool]:
+    now = datetime.now(timezone.utc)
+    captured_at = _parse_iso(item.get("captured_at")) or now
+    last_surfaced = _parse_iso(item.get("last_surfaced"))
+    age_days = max(0.0, (now - captured_at).total_seconds() / 86400.0)
+    untouched_days = max(0.0, (now - (last_surfaced or captured_at)).total_seconds() / 86400.0)
+
+    heat = max(0.05, float(item.get("heat") or 1.0))
+    recency = 1.0 / (1.0 + age_days / 14.0)
+    dwell_bonus = min(0.25, float(item.get("dwell_seconds") or 0.0) / 120.0)
+    star_bonus = 0.45 if item.get("starred") else 0.0
+    resurfacing_gap = 0.18 if age_days >= 3 and untouched_days >= 14 else 0.0
+    mode_bonus = _mode_bonus(item, mode)
+
+    score = heat * 0.68 + recency * 0.2 + dwell_bonus + star_bonus + resurfacing_gap + mode_bonus
+    reason = "hot_memory"
+    if age_days >= 30 and untouched_days >= 30:
+        reason = "review_or_archive"
+    elif resurfacing_gap:
+        reason = "worth_resurfacing"
+    elif item.get("starred"):
+        reason = "starred_memory"
+    elif age_days < 2:
+        reason = "recent_capture"
+
+    needs_review = age_days >= 30 and untouched_days >= 30 and heat < 0.8
+    return score, reason, needs_review
+
+
+def _mode_bonus(item: dict[str, Any], mode: str) -> float:
+    content_type = str(item.get("content_type") or "")
+    text = str(item.get("text_content") or "").lower()
+    if mode == "focus":
+        technical_tokens = ("api", "docker", "kubernetes", "database", "architecture", "python", "typescript")
+        return 0.2 if content_type in {"article", "post"} and any(t in text for t in technical_tokens) else 0.05
+    if mode == "light":
+        return 0.18 if content_type in {"video", "image"} else 0.0
+    if mode == "explore":
+        surfaced_count = int(item.get("surfaced_count") or 0)
+        return max(0.0, 0.16 - math.log1p(surfaced_count) * 0.04)
+    return 0.0
+
+
+def _normalize_thumbnail(value: str | None) -> str | None:
+    if not value:
+        return None
+    if value.startswith(("http://", "https://", "/images/")):
+        return value
+    p = Path(value)
+    try:
+        if p.exists() and p.parent.resolve() == IMAGE_CACHE_DIR.resolve():
+            return f"/images/{p.name}"
+    except Exception:
+        return None
+    return None

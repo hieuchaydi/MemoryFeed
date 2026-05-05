@@ -4,11 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchTimeline } from "../api/client";
 import ResultCard from "../components/ResultCard";
 import { todayISO } from "../hooks/time";
+import { useSettings } from "../settings";
 import type { FeedItem } from "../types";
 
 const PLATFORMS = ["all", "facebook", "twitter", "youtube", "linkedin", "instagram", "unknown"];
 
 export default function TimelinePage() {
+  const { t } = useSettings();
   const [date, setDate] = useState(todayISO());
   const [platform, setPlatform] = useState("all");
 
@@ -32,7 +34,8 @@ export default function TimelinePage() {
   return (
     <section className="page">
       <div className="hero-panel compact">
-        <h1>Timeline</h1>
+        <h1>{t.timeline.title}</h1>
+        <p>{t.timeline.description}</p>
         <div className="query-grid">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="query-input" />
           <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="days-select">
@@ -45,8 +48,8 @@ export default function TimelinePage() {
         </div>
       </div>
 
-      {timelineQ.isFetching ? <div className="state">Dang tai timeline...</div> : null}
-      {!timelineQ.isFetching && groups.length === 0 ? <div className="state">Khong co du lieu.</div> : null}
+      {timelineQ.isFetching ? <div className="state">{t.timeline.loading}</div> : null}
+      {!timelineQ.isFetching && groups.length === 0 ? <div className="state">{t.timeline.empty}</div> : null}
 
       <div className="timeline-groups">
         {groups.map(([hour, items]) => (

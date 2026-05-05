@@ -15,6 +15,7 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from backend.indexer import IndexerService
+from backend.interest import InterestEngine
 from backend.llm_clients import (
     GROQ_MODEL,
     GEMINI_MODEL,
@@ -157,6 +158,80 @@ def timeline(date_str: str | None) -> None:
         hhmm = item["captured_at"][11:16] if len(item["captured_at"]) >= 16 else "--:--"
         text = (item.get("text_content") or "").replace("\n", " ")[:100]
         table.add_row(hhmm, item["platform"], text, "yes" if item.get("starred") else "no")
+    console.print(table)
+
+
+@cli.command()
+@click.option("--limit", default=10, show_default=True, type=int)
+@click.option(
+    "--mode",
+    default="default",
+    type=click.Choice(["default", "focus", "light", "explore"], case_sensitive=False),
+    show_default=True,
+)
+def feed(limit: int, mode: str) -> None:
+    """Show active feed ranked by personal memory heat."""
+    store = Store()
+    indexer = IndexerService(store)
+    searcher = Searcher(store, indexer)
+    interest = InterestEngine(store, searcher)
+
+    async def _run() -> list[dict]:
+        return await interest.active_feed(limit=limit, mode=mode)
+
+    rows = asyncio.run(_run())
+    if not rows:
+        console.print("[yellow]No feed items yet.[/yellow]")
+        return
+
+    table = Table(title=f"Active Feed ({mode})")
+    table.add_column("Heat", style="red")
+    table.add_column("Reason", style="cyan")
+    table.add_column("Platform")
+    table.add_column("Text")
+    table.add_column("URL", style="blue")
+    for item in rows:
+        table.add_row(
+            f"{float(item.get('heat', 0.0)):.2f}",
+            str(item.get("surface_reason", "")),
+            item["platform"],
+            (item.get("text_excerpt") or item.get("text_content") or "")[:90],
+            item["url"],
+        )
+    console.print(table)
+
+
+@cli.command()
+@click.argument("context", nargs=1)
+@click.option("--limit", default=5, show_default=True, type=int)
+@click.option("--no-bump", is_flag=True, help="Return suggestions without updating heat/surfaced metadata")
+def resurface(context: str, limit: int, no_bump: bool) -> None:
+    """Surface memories related to current context."""
+    store = Store()
+    indexer = IndexerService(store)
+    searcher = Searcher(store, indexer)
+    interest = InterestEngine(store, searcher)
+
+    async def _run() -> list[dict]:
+        return await interest.resurface_context(context=context, limit=limit, bump_heat=not no_bump)
+
+    rows = asyncio.run(_run())
+    if not rows:
+        console.print("[yellow]No related memories found.[/yellow]")
+        return
+
+    table = Table(title="Resurfaced Memories")
+    table.add_column("Heat", style="red")
+    table.add_column("Platform")
+    table.add_column("Text")
+    table.add_column("URL", style="blue")
+    for item in rows:
+        table.add_row(
+            f"{float(item.get('heat', 0.0)):.2f}",
+            item["platform"],
+            (item.get("text_excerpt") or item.get("text_content") or "")[:100],
+            item["url"],
+        )
     console.print(table)
 
 

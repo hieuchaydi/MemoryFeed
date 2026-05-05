@@ -93,6 +93,10 @@ class Searcher:
                     "starred": bool(item.get("starred", False)),
                     "note": item.get("note"),
                     "tags": item.get("tags", []),
+                    "heat": float(item.get("heat", 1.0) or 1.0),
+                    "last_surfaced": item.get("last_surfaced"),
+                    "surfaced_count": int(item.get("surfaced_count", 0) or 0),
+                    "archived_at": item.get("archived_at"),
                 }
             )
             if len(merged) >= limit:

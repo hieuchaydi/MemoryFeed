@@ -239,8 +239,19 @@
       .map((a) => a.href)
       .filter(Boolean);
     const videoSrc = element.querySelector("video source")?.src || element.querySelector("video")?.src || "";
+    const pageLinks = [...document.querySelectorAll('a[href*="/video/"]')]
+      .map((a) => a.href)
+      .filter(Boolean);
     const canonical = document.querySelector('link[rel="canonical"]')?.href || "";
-    const url = links[0] || (window.location.href.includes("/video/") ? window.location.href : canonical || videoSrc || window.location.href);
+    const ogUrl = document.querySelector('meta[property="og:url"]')?.content || "";
+    const url =
+      links[0] ||
+      pageLinks[0] ||
+      (window.location.href.includes("/video/") ? window.location.href : "") ||
+      (canonical.includes("/video/") ? canonical : "") ||
+      (ogUrl.includes("/video/") ? ogUrl : "") ||
+      videoSrc ||
+      window.location.href;
 
     const posterMeta = document.querySelector('meta[property="og:image"]')?.content || null;
     const images = [...element.querySelectorAll('img')]

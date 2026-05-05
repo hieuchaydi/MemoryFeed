@@ -1,9 +1,11 @@
 import type {
+  ActiveFeedResponse,
   ExportResponse,
   ItemsResponse,
   NativeStatusResponse,
   QueueStatusResponse,
   ResetResponse,
+  ResurfaceResponse,
   SearchResponse,
   StatsResponse,
   TimelineResponse,
@@ -19,6 +21,18 @@ interface SearchOptions {
 interface TimelineOptions {
   date?: string;
   platform?: string;
+}
+
+interface ActiveFeedOptions {
+  limit?: number;
+  mode?: string;
+}
+
+interface ResurfacePayload {
+  context: string;
+  source_item_id?: string;
+  limit?: number;
+  bump_heat?: boolean;
 }
 
 interface ItemListOptions {
@@ -65,6 +79,34 @@ export function fetchTimeline({ date, platform }: TimelineOptions = {}): Promise
   if (date) params.set("date", date);
   if (platform && platform !== "all") params.set("platform", platform);
   return apiFetch<TimelineResponse>(`/api/timeline?${params.toString()}`);
+}
+
+export function fetchActiveFeed({ limit = 24, mode = "default" }: ActiveFeedOptions = {}): Promise<ActiveFeedResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  params.set("mode", mode);
+  return apiFetch<ActiveFeedResponse>(`/api/feed?${params.toString()}`);
+}
+
+export function resurfaceContext(payload: ResurfacePayload): Promise<ResurfaceResponse> {
+  return apiFetch<ResurfaceResponse>("/api/resurface", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function markFeedSurfaced(itemIds: string[]): Promise<{ ok: boolean; updated: number }> {
+  return apiFetch<{ ok: boolean; updated: number }>("/api/feed/surfaced", {
+    method: "POST",
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+}
+
+export function archiveFeedItems(itemIds: string[]): Promise<{ ok: boolean; updated: number }> {
+  return apiFetch<{ ok: boolean; updated: number }>("/api/feed/archive", {
+    method: "POST",
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
 }
 
 export function fetchStats(): Promise<StatsResponse> {

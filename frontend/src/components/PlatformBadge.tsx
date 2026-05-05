@@ -1,12 +1,13 @@
 import clsx from "clsx";
 
-const MAP: Record<string, { emoji: string; tone: string }> = {
-  twitter: { emoji: "🐦", tone: "tw" },
-  facebook: { emoji: "👥", tone: "fb" },
-  youtube: { emoji: "📺", tone: "yt" },
-  linkedin: { emoji: "💼", tone: "li" },
-  instagram: { emoji: "📸", tone: "ig" },
-  unknown: { emoji: "🧠", tone: "uk" },
+const MAP: Record<string, { label: string; tone: string }> = {
+  twitter: { label: "X", tone: "tw" },
+  facebook: { label: "FB", tone: "fb" },
+  youtube: { label: "YT", tone: "yt" },
+  linkedin: { label: "IN", tone: "li" },
+  instagram: { label: "IG", tone: "ig" },
+  tiktok: { label: "TT", tone: "tt" },
+  unknown: { label: "MF", tone: "uk" },
 };
 
 interface PlatformBadgeProps {
@@ -17,8 +18,8 @@ export default function PlatformBadge({ platform }: PlatformBadgeProps) {
   const normalized = platform || "unknown";
   const config = MAP[normalized] || MAP.unknown;
   return (
-    <span className={clsx("platform-badge", `tone-${config.tone}`)}>
-      <span>{config.emoji}</span>
+    <span className={clsx("platform-badge", `tone-${config.tone}`)} title={normalized}>
+      <span className="platform-mark">{config.label}</span>
       <span>{normalized}</span>
     </span>
   );

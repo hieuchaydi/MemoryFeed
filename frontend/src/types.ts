@@ -10,6 +10,13 @@ export interface FeedItem {
   score?: number | null;
   starred?: boolean;
   note?: string | null;
+  heat?: number | null;
+  last_surfaced?: string | null;
+  surfaced_count?: number;
+  archived_at?: string | null;
+  surface_score?: number | null;
+  surface_reason?: string | null;
+  needs_review?: boolean;
 }
 
 export interface SearchResponse {
@@ -21,6 +28,17 @@ export interface SearchResponse {
 export interface TimelineResponse {
   date: string;
   platform?: string | null;
+  count: number;
+  items: FeedItem[];
+}
+
+export interface ActiveFeedResponse {
+  mode: string;
+  count: number;
+  items: FeedItem[];
+}
+
+export interface ResurfaceResponse {
   count: number;
   items: FeedItem[];
 }
@@ -69,4 +87,3 @@ export interface ExportResponse {
 export interface ResetResponse {
   ok: boolean;
 }
-

@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { exportData, fetchNativeStatus, fetchQueues, fetchStats, resetData } from "../api/client";
+import { useSettings } from "../settings";
 
 export default function StatsPage() {
+  const { t } = useSettings();
   const qc = useQueryClient();
   const statsQ = useQuery({ queryKey: ["stats"], queryFn: fetchStats, refetchInterval: 3000 });
   const nativeQ = useQuery({ queryKey: ["native"], queryFn: fetchNativeStatus, refetchInterval: 10_000 });
@@ -21,44 +23,44 @@ export default function StatsPage() {
   return (
     <section className="page">
       <div className="hero-panel compact">
-        <h1>System Stats</h1>
-        <p>Quan sat suc khoe pipeline indexing, queue backlog va cong cu van hanh.</p>
+        <h1>{t.stats.title}</h1>
+        <p>{t.stats.description}</p>
       </div>
 
       <div className="status-grid large">
         <div className="status-card">
-          <span>Total captures</span>
+          <span>{t.stats.total}</span>
           <b>{statsQ.data?.total ?? "..."}</b>
         </div>
         <div className="status-card">
-          <span>Today</span>
+          <span>{t.stats.today}</span>
           <b>{statsQ.data?.today ?? "..."}</b>
         </div>
         <div className="status-card">
-          <span>Native enabled</span>
+          <span>{t.stats.nativeEnabled}</span>
           <b>{String(nativeQ.data?.enabled ?? "...")}</b>
         </div>
         <div className="status-card">
-          <span>Native reason</span>
+          <span>{t.stats.nativeReason}</span>
           <b>{nativeQ.data?.reason ?? "..."}</b>
         </div>
       </div>
 
       <div className="status-grid large">
         <div className="status-card">
-          <span>Indexer queue</span>
+          <span>{t.stats.indexerQueue}</span>
           <b>{queueQ.data?.indexer?.queue_size ?? "..."}</b>
         </div>
         <div className="status-card">
-          <span>Vision queue</span>
+          <span>{t.stats.visionQueue}</span>
           <b>{queueQ.data?.vision?.queue_size ?? "..."}</b>
         </div>
         <div className="status-card">
-          <span>Indexer processed/failed</span>
+          <span>{t.stats.indexerProcessed}</span>
           <b>{queueQ.data ? `${queueQ.data.indexer.processed}/${queueQ.data.indexer.failed}` : "..."}</b>
         </div>
         <div className="status-card">
-          <span>Vision processed/failed</span>
+          <span>{t.stats.visionProcessed}</span>
           <b>{queueQ.data ? `${queueQ.data.vision.processed}/${queueQ.data.vision.failed}` : "..."}</b>
         </div>
       </div>
@@ -70,27 +72,27 @@ export default function StatsPage() {
           onClick={() => exportMut.mutate()}
           disabled={exportMut.isPending}
         >
-          {exportMut.isPending ? "Dang export..." : "Export JSON"}
+          {exportMut.isPending ? t.stats.exporting : t.stats.export}
         </button>
         <button
           type="button"
           className="action-btn danger"
           onClick={() => {
-            if (window.confirm("Reset toan bo du lieu? Hanh dong nay khong the hoan tac.")) {
+            if (window.confirm(t.stats.resetConfirm)) {
               resetMut.mutate();
             }
           }}
           disabled={resetMut.isPending}
         >
-          {resetMut.isPending ? "Dang reset..." : "Reset Data"}
+          {resetMut.isPending ? t.stats.resetting : t.stats.reset}
         </button>
       </div>
 
-      {exportMut.data?.file ? <div className="state">Da export: {exportMut.data.file}</div> : null}
+      {exportMut.data?.file ? <div className="state">{t.stats.exported}: {exportMut.data.file}</div> : null}
 
       <div className="stats-grid">
         <div className="stats-box">
-          <h2>By platform</h2>
+          <h2>{t.stats.byPlatform}</h2>
           <ul>
             {(statsQ.data?.by_platform || []).map((row) => (
               <li key={row.key}>
@@ -101,7 +103,7 @@ export default function StatsPage() {
           </ul>
         </div>
         <div className="stats-box">
-          <h2>By type</h2>
+          <h2>{t.stats.byType}</h2>
           <ul>
             {(statsQ.data?.by_type || []).map((row) => (
               <li key={row.key}>
