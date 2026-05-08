@@ -18,7 +18,8 @@
 
 ## 4) Ingestion Strategy
 - Extension captures content after dwell > 3 seconds.
-- Deduplicate by `url + first 100 chars` hash.
+- Normalize capture payload to canonical URL + post id + quality flags before insert.
+- Deduplicate by `canonical_url + normalized_text + author + 2-hour time bucket` fingerprint.
 - `/capture` endpoint returns quickly and never waits for heavy jobs.
 
 ## 5) Async Processing

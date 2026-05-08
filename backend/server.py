@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import os
 import time
@@ -65,6 +66,7 @@ indexer = IndexerService(store)
 vision = VisionService(store, indexer)
 searcher = Searcher(store, indexer)
 interest = InterestEngine(store, searcher)
+capture_metrics = collections.defaultdict(lambda: {"attempts": 0, "stored": 0, "duplicates": 0, "missing": 0})
 
 if IMAGE_CACHE_DIR.exists():
     app.mount("/images", StaticFiles(directory=str(IMAGE_CACHE_DIR)), name="images")
@@ -158,12 +160,35 @@ async def shutdown_event() -> None:
 @app.post("/api/capture", response_model=CaptureResponse)
 async def capture_item(payload: CaptureRequest) -> CaptureResponse:
     item = normalize_capture(payload)
+    platform = item.get("platform") or "unknown"
+    quality_flags = item.get("quality_flags") or []
+    capture_metrics[platform]["attempts"] += 1
+    if any(flag.startswith("missing_") for flag in quality_flags):
+        capture_metrics[platform]["missing"] += 1
+
+    logger.info(
+        "capture_attempt %s",
+        json.dumps(
+            {
+                "platform": platform,
+                "canonical_url": item.get("canonical_url"),
+                "post_id": item.get("post_id"),
+                "quality_flags": quality_flags,
+                "missing_fields": [f[8:] for f in quality_flags if f.startswith("missing_")],
+                "selector_used": (item.get("capture_debug") or {}).get("selector_used", {}),
+            },
+            ensure_ascii=False,
+        ),
+    )
+
     inserted, item_id = await asyncio.to_thread(store.insert_item, item)
 
     if not inserted:
+        capture_metrics[platform]["duplicates"] += 1
         logger.info("capture duplicate id=%s url=%s", item_id, item.get("url"))
         return CaptureResponse(status="duplicate", id=item_id)
 
+    capture_metrics[platform]["stored"] += 1
     if item.get("image_urls"):
         await vision.enqueue(item["id"])
     else:
@@ -237,6 +262,18 @@ async def archive_feed_items_api(payload: ArchiveItemsRequest) -> dict[str, Any]
 @app.get("/api/stats")
 async def stats_api() -> dict[str, Any]:
     payload = await asyncio.to_thread(store.stats)
+    payload["capture_reliability"] = [
+        {
+            "platform": platform,
+            "attempts": stats["attempts"],
+            "stored": stats["stored"],
+            "duplicates": stats["duplicates"],
+            "missing_required": stats["missing"],
+            "success_rate": round((stats["stored"] / stats["attempts"]) if stats["attempts"] else 0.0, 4),
+            "fail_rate": round((1 - (stats["stored"] / stats["attempts"])) if stats["attempts"] else 0.0, 4),
+        }
+        for platform, stats in sorted(capture_metrics.items(), key=lambda item: item[0])
+    ]
     payload["queues"] = {
         "indexer": indexer.status(),
         "vision": vision.status(),

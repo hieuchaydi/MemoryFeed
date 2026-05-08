@@ -12,11 +12,20 @@ ContentType = Literal["post", "video", "image", "article"]
 
 class CaptureRequest(BaseModel):
     url: str = Field(min_length=3, max_length=2000)
+    canonical_url: str | None = None
+    post_id: str | None = None
     platform: Platform = "unknown"
     content_type: ContentType | None = None
     text_content: str | None = None
+    media_urls: list[str] = Field(default_factory=list)
     image_urls: list[str] = Field(default_factory=list)
     author: str | None = None
+    author_name: str | None = None
+    author_handle: str | None = None
+    thumbnail_url: str | None = None
+    source_context: str | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    capture_debug: dict | None = None
     dwell_seconds: float = Field(default=0.0, ge=0.0, le=3600.0)
     captured_at: datetime | None = None
 

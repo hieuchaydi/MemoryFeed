@@ -116,8 +116,19 @@ class Store:
                 self._ensure_column(conn, "items", "last_surfaced", "TEXT")
                 self._ensure_column(conn, "items", "surfaced_count", "INTEGER DEFAULT 0")
                 self._ensure_column(conn, "items", "archived_at", "TEXT")
+                self._ensure_column(conn, "items", "canonical_url", "TEXT")
+                self._ensure_column(conn, "items", "post_id", "TEXT")
+                self._ensure_column(conn, "items", "media_urls", "TEXT")
+                self._ensure_column(conn, "items", "author_name", "TEXT")
+                self._ensure_column(conn, "items", "author_handle", "TEXT")
+                self._ensure_column(conn, "items", "thumbnail_url", "TEXT")
+                self._ensure_column(conn, "items", "source_context", "TEXT")
+                self._ensure_column(conn, "items", "quality_flags", "TEXT")
+                self._ensure_column(conn, "items", "capture_debug", "TEXT")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_heat ON items(heat);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_archived_at ON items(archived_at);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_canonical_url ON items(canonical_url);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_post_id ON items(post_id);")
                 conn.commit()
             finally:
                 conn.close()
@@ -140,8 +151,10 @@ class Store:
                         id, url, platform, content_type, text_content, image_urls,
                         image_captions, author, captured_at, dwell_seconds,
                         embedding_done, vision_done, dedupe_key, image_cache_paths,
-                        starred, note, tags, heat, last_surfaced, surfaced_count, archived_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        starred, note, tags, heat, last_surfaced, surfaced_count, archived_at,
+                        canonical_url, post_id, media_urls, author_name, author_handle,
+                        thumbnail_url, source_context, quality_flags, capture_debug
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"],
@@ -165,6 +178,15 @@ class Store:
                         item.get("last_surfaced"),
                         int(item.get("surfaced_count", 0) or 0),
                         item.get("archived_at"),
+                        item.get("canonical_url"),
+                        item.get("post_id"),
+                        json.dumps(item.get("media_urls", []), ensure_ascii=False),
+                        item.get("author_name"),
+                        item.get("author_handle"),
+                        item.get("thumbnail_url"),
+                        item.get("source_context"),
+                        json.dumps(item.get("quality_flags", []), ensure_ascii=False),
+                        json.dumps(item.get("capture_debug", {}), ensure_ascii=False),
                     ),
                 )
                 conn.commit()
@@ -183,9 +205,18 @@ class Store:
     def _normalize_item_for_insert(item: dict[str, Any]) -> dict[str, Any]:
         out = dict(item)
         out.setdefault("image_urls", [])
+        out.setdefault("media_urls", out.get("image_urls", []))
         out.setdefault("image_captions", [])
         out.setdefault("image_cache_paths", [])
         out.setdefault("author", None)
+        out.setdefault("author_name", out.get("author"))
+        out.setdefault("author_handle", None)
+        out.setdefault("canonical_url", out.get("url"))
+        out.setdefault("post_id", None)
+        out.setdefault("thumbnail_url", None)
+        out.setdefault("source_context", None)
+        out.setdefault("quality_flags", [])
+        out.setdefault("capture_debug", {})
         out.setdefault("dwell_seconds", 0.0)
         out.setdefault("embedding_done", 0)
         out.setdefault("vision_done", 1 if not out.get("image_urls") else 0)
@@ -202,7 +233,15 @@ class Store:
         out.setdefault("text_content", "")
 
         if not out.get("dedupe_key"):
-            seed = f"{out.get('url', '')}|{str(out.get('text_content', ''))[:100]}".encode(
+            canonical = out.get("canonical_url") or out.get("url") or ""
+            author_name = out.get("author_name") or out.get("author") or ""
+            captured_at = out.get("captured_at") or now_iso()
+            try:
+                dt = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+                bucket = str(int(dt.timestamp() // (2 * 60 * 60)))
+            except Exception:
+                bucket = str(captured_at)[:13]
+            seed = f"{canonical}|{str(out.get('text_content', ''))[:240]}|{author_name[:100]}|{bucket}".encode(
                 "utf-8", errors="ignore"
             )
             out["dedupe_key"] = hashlib.sha256(seed).hexdigest()
@@ -588,14 +627,23 @@ class Store:
             "content_type": row["content_type"],
             "text_content": row["text_content"],
             "image_urls": json.loads(row["image_urls"] or "[]"),
+            "media_urls": json.loads(row["media_urls"] or "[]") if "media_urls" in row.keys() and row["media_urls"] else json.loads(row["image_urls"] or "[]"),
             "image_captions": json.loads(row["image_captions"] or "[]"),
             "image_cache_paths": json.loads(row["image_cache_paths"] or "[]"),
             "author": row["author"],
+            "author_name": row["author_name"] if "author_name" in row.keys() and row["author_name"] is not None else row["author"],
+            "author_handle": row["author_handle"] if "author_handle" in row.keys() else None,
             "captured_at": row["captured_at"],
             "dwell_seconds": row["dwell_seconds"] or 0.0,
             "embedding_done": bool(row["embedding_done"]),
             "vision_done": bool(row["vision_done"]),
             "dedupe_key": row["dedupe_key"],
+            "canonical_url": row["canonical_url"] if "canonical_url" in row.keys() and row["canonical_url"] else row["url"],
+            "post_id": row["post_id"] if "post_id" in row.keys() else None,
+            "thumbnail_url": row["thumbnail_url"] if "thumbnail_url" in row.keys() else None,
+            "source_context": row["source_context"] if "source_context" in row.keys() else None,
+            "quality_flags": json.loads(row["quality_flags"] or "[]") if "quality_flags" in row.keys() and row["quality_flags"] else [],
+            "capture_debug": json.loads(row["capture_debug"] or "{}") if "capture_debug" in row.keys() and row["capture_debug"] else {},
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
             "note": row["note"] if "note" in row.keys() else None,
             "tags": json.loads(row["tags"] or "[]") if "tags" in row.keys() and row["tags"] else [],

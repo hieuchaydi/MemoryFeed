@@ -84,7 +84,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ok: true,
         status: data.status,
         platform: message.payload?.platform || "unknown",
-        url: message.payload?.url || "",
+        url: message.payload?.canonical_url || message.payload?.url || "",
       });
       sendResponse({ ok: true, data });
     })
@@ -94,7 +94,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ok: false,
         error: String(error),
         platform: message.payload?.platform || "unknown",
-        url: message.payload?.url || "",
+        url: message.payload?.canonical_url || message.payload?.url || "",
       });
       sendResponse({ ok: false, error: String(error) });
     });
@@ -108,14 +108,14 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   captureActiveTabNow()
     .then(async (payload) => {
       if (!payload || !payload.url) {
-        throw new Error("Không đọc được nội dung tab hiện tại.");
+        throw new Error("Cannot read current tab content.");
       }
       const data = await postCapture(payload);
       await setLastStatus({
         ok: true,
         status: data.status || "stored",
         platform: payload.platform || "unknown",
-        url: payload.url || "",
+        url: payload.canonical_url || payload.url || "",
         manual_capture: true,
       });
       sendResponse({ ok: true, data });
@@ -134,13 +134,13 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function captureActiveTabNow() {
   if (!ext.tabs || !ext.scripting) {
-    throw new Error("Trình duyệt không hỗ trợ tabs/scripting API.");
+    throw new Error("Browser does not support tabs/scripting API.");
   }
 
   const tabs = await ext.tabs.query({ active: true, currentWindow: true });
   const tab = tabs && tabs[0];
   if (!tab || typeof tab.id !== "number") {
-    throw new Error("Không tìm thấy tab đang mở.");
+    throw new Error("Cannot find active tab.");
   }
 
   const injected = await ext.scripting.executeScript({
@@ -216,17 +216,23 @@ async function captureActiveTabNow() {
       }
 
       return {
-        url:
-          platform === "tiktok"
-            ? document.querySelector('a[href*="/video/"]')?.href ||
-              safeText(document.querySelector('meta[property="og:url"]')?.content) ||
-              location.href
-            : location.href,
+        url: location.href,
+        canonical_url: location.href,
         platform,
+        post_id: null,
         content_type: contentType,
         text_content: text || "",
+        media_urls: images,
         image_urls: images,
         author,
+        author_name: author,
+        quality_flags: [],
+        capture_debug: {
+          selector_used: {
+            text: "manual_capture:page",
+          },
+          missing_fields: [],
+        },
         dwell_seconds: 2.0,
       };
     },
@@ -252,11 +258,20 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   const payload = {
     url: "https://local.memoryfeed/self-test",
+    canonical_url: "https://local.memoryfeed/self-test",
     platform: "unknown",
     content_type: "post",
-    text_content: `MemoryFeed tự kiểm tra lúc ${new Date().toISOString()}`,
+    post_id: "self-test",
+    text_content: `MemoryFeed self test at ${new Date().toISOString()}`,
+    media_urls: [],
     image_urls: [],
     author: "memoryfeed-extension",
+    author_name: "memoryfeed-extension",
+    quality_flags: ["missing_media_urls"],
+    capture_debug: {
+      selector_used: { text: "self_test" },
+      missing_fields: ["media_urls"],
+    },
     dwell_seconds: 1.0,
   };
 

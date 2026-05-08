@@ -272,4 +272,4 @@ Current mapping:
 - `/capture` is non-blocking: vision + embedding run in background queues.
 - Search includes short-TTL response cache with automatic invalidation on new captures.
 - Semantic query vectors use in-memory cache to reduce repeated model encodes.
-- Dedupe key = URL + first 100 chars of text.
+- Dedupe fingerprint = canonical URL + normalized text + author + 2-hour time bucket.
