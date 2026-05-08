@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memoryfeed"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Find anything you've seen on social media"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -43,3 +43,6 @@ include = [
   "deploy_web.ps1",
   "README.md"
 ]
+
+[tool.hatch.version]
+path = "memoryfeed/__version__.py"

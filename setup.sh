@@ -22,15 +22,27 @@ fi
 
 echo "Python version OK: $PY_VER"
 
-if [ -z "${GEMINI_API_KEY:-}" ]; then
-  echo "Missing GEMINI_API_KEY"
-  echo "Export GEMINI_API_KEY before running setup."
+OFFLINE_ONLY_VALUE="${OFFLINE_ONLY:-0}"
+AI_PROVIDER="$(printf '%s' "${MEMORYFEED_AI_PROVIDER:-auto}" | tr '[:upper:]' '[:lower:]')"
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if is_truthy "$OFFLINE_ONLY_VALUE"; then
+  AI_PROVIDER="none"
+fi
+
+if [ "$AI_PROVIDER" = "gemini" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+  echo "Missing GEMINI_API_KEY (required by MEMORYFEED_AI_PROVIDER=gemini)"
   exit 1
 fi
 
-if [ -z "${GROQ_API_KEY:-}" ]; then
-  echo "Missing GROQ_API_KEY"
-  echo "Export GROQ_API_KEY before running setup."
+if [ "$AI_PROVIDER" = "groq" ] && [ -z "${GROQ_API_KEY:-}" ]; then
+  echo "Missing GROQ_API_KEY (required by MEMORYFEED_AI_PROVIDER=groq)"
   exit 1
 fi
 
@@ -45,9 +57,17 @@ else
 fi
 
 echo ""
-echo "LLM providers configured:"
-echo "- Gemini API key: set"
-echo "- Groq API key  : set"
+echo "AI mode: OFFLINE_ONLY=${OFFLINE_ONLY_VALUE} MEMORYFEED_AI_PROVIDER=${AI_PROVIDER}"
+if [ -n "${GEMINI_API_KEY:-}" ]; then
+  echo "- Gemini API key: set"
+else
+  echo "- Gemini API key: not set"
+fi
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  echo "- Groq API key  : set"
+else
+  echo "- Groq API key  : not set"
+fi
 echo ""
 echo "Extension (Chrome/Edge/Brave): load unpacked from ./extension/chrome/"
 echo "Extension (Firefox): load manifest ./extension/firefox/manifest.json"

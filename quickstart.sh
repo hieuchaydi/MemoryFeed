@@ -9,24 +9,15 @@ if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 fi
 
-if [ -z "${GEMINI_API_KEY:-}" ]; then
-  echo "Missing GEMINI_API_KEY"
-  echo "Export GEMINI_API_KEY before running quickstart."
-  exit 1
-fi
-
-if [ -z "${GROQ_API_KEY:-}" ]; then
-  echo "Missing GROQ_API_KEY"
-  echo "Export GROQ_API_KEY before running quickstart."
-  exit 1
-fi
-
 echo "[1/4] Running setup..."
 bash ./setup.sh
 
 echo "[2/4] Starting backend on :7749 ..."
 memoryfeed serve > /tmp/memoryfeed-backend.log 2>&1 &
 BACK_PID=$!
+
+echo "[2.5/4] Running local health checks..."
+memoryfeed doctor || true
 
 echo "[3/4] Starting frontend on :5173 ..."
 (

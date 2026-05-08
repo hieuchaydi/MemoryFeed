@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from backend.indexer import IndexerService
@@ -11,6 +10,8 @@ from backend.interest import InterestEngine
 from backend.llm_clients import check_gemini_connectivity, check_groq_connectivity, providers_snapshot
 from backend.logging_setup import configure_logging
 from backend.native_accel import status as native_status
+from backend.redaction import redact_value
+from backend.runtime_config import load_runtime_config, provider_requires_key
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, DB_PATH, IMAGE_CACHE_DIR, LANCEDB_DIR, Store
 
@@ -42,6 +43,26 @@ def _create_services() -> tuple[Store, IndexerService, Searcher, InterestEngine]
     return store, indexer, searcher, interest
 
 
+def _clamp_mcp_limit(requested: int, hard_cap: int = 50) -> int:
+    cfg = load_runtime_config()
+    return max(1, min(requested, cfg.mcp_max_results, hard_cap))
+
+
+def _finalize_tool_payload(tool_name: str, payload: dict[str, Any], query: str | None = None) -> dict[str, Any]:
+    cfg = load_runtime_config()
+    if cfg.mcp_redact_output:
+        payload = redact_value(payload)
+    result_count = int(payload.get("count", 0))
+    logger.info(
+        "mcp_audit timestamp=%s tool_name=%s query=%s result_count=%s",
+        datetime.now(timezone.utc).isoformat(),
+        tool_name,
+        (query or "")[:200],
+        result_count,
+    )
+    return payload
+
+
 def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp"):
     if FastMCP is None:
         raise RuntimeError(
@@ -69,7 +90,9 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
             "extension": ["Chrome/Edge/Brave", "Firefox"],
             "optional_native": "C++ via pybind11",
         }
-        return {
+        return _finalize_tool_payload(
+            "detect_stack",
+            {
             "project": "memoryfeed",
             "stack": stack,
             "paths": {
@@ -78,7 +101,8 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 "vector_dir": str(LANCEDB_DIR),
                 "image_cache_dir": str(IMAGE_CACHE_DIR),
             },
-        }
+            },
+        )
 
     @mcp.tool(name="check_project_health")
     def check_project_health() -> dict[str, Any]:
@@ -106,10 +130,13 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 )
             )
 
+        cfg = load_runtime_config()
         gemini_ok, gemini_reason = check_gemini_connectivity(timeout_s=4.0)
         groq_ok, groq_reason = check_groq_connectivity(timeout_s=4.0)
+        gemini_required = provider_requires_key("gemini", cfg)
+        groq_required = provider_requires_key("groq", cfg)
 
-        if not gemini_ok:
+        if not gemini_ok and gemini_required:
             issues.append(
                 HealthIssue(
                     type="gemini_unavailable",
@@ -119,7 +146,7 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 )
             )
 
-        if not groq_ok:
+        if not groq_ok and groq_required:
             issues.append(
                 HealthIssue(
                     type="groq_unavailable",
@@ -148,10 +175,12 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
 
         next_steps = [i.suggested_fix for i in issues] or [
             "Run `search_memory` to validate retrieval quality.",
-            "Run `memoryfeed serve-web --host 0.0.0.0 --port 7749` for public web access.",
+            "Run `memoryfeed doctor` for full local safety diagnostics.",
         ]
 
-        return {
+        return _finalize_tool_payload(
+            "check_project_health",
+            {
             "score": score,
             "issues": [asdict(i) for i in issues],
             "summary": {
@@ -164,7 +193,8 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
                 "runtime_perf": searcher.perf_stats(),
             },
             "suggested_next_steps": next_steps,
-        }
+            },
+        )
 
     @mcp.tool(name="get_memoryfeed_stats")
     def get_memoryfeed_stats() -> dict[str, Any]:
@@ -172,71 +202,99 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
         payload = store.stats()
         payload["native"] = native_status()
         payload["date"] = date.today().isoformat()
-        return payload
+        return _finalize_tool_payload("get_memoryfeed_stats", payload)
 
     @mcp.tool(name="get_runtime_perf")
     def get_runtime_perf() -> dict[str, Any]:
         """Returns runtime diagnostics (cache, queues, native status)."""
-        return {
+        payload = {
             "searcher": searcher.perf_stats(),
             "indexer": indexer.status(),
             "native": native_status(),
         }
+        return _finalize_tool_payload("get_runtime_perf", payload)
 
     @mcp.tool(name="active_memory_feed")
     async def active_memory_feed(limit: int = 10, mode: str = "default") -> dict[str, Any]:
         """
         Returns a proactive feed ranked by memory heat, recency, resurfacing gap, and mode.
         """
-        safe_limit = max(1, min(limit, 50))
+        cfg = load_runtime_config()
+        if not cfg.mcp_allow_active_feed:
+            return _finalize_tool_payload(
+                "active_memory_feed",
+                {"count": 0, "items": [], "warning": "active_memory_feed is disabled by server policy"},
+            )
+        safe_limit = _clamp_mcp_limit(limit, hard_cap=50)
         safe_mode = mode if mode in {"default", "focus", "light", "explore"} else "default"
         items = await interest.active_feed(limit=safe_limit, mode=safe_mode)
-        return {
+        return _finalize_tool_payload(
+            "active_memory_feed",
+            {
             "mode": safe_mode,
             "count": len(items),
             "items": items,
-        }
+            },
+        )
 
     @mcp.tool(name="resurface_memory_context")
     async def resurface_memory_context(context: str, limit: int = 5, bump_heat: bool = True) -> dict[str, Any]:
         """
         Surfaces old memories related to the current work/read/write context.
         """
-        safe_limit = max(1, min(limit, 20))
+        safe_limit = _clamp_mcp_limit(limit, hard_cap=20)
         items = await interest.resurface_context(context=context, limit=safe_limit, bump_heat=bump_heat)
-        return {
+        return _finalize_tool_payload(
+            "resurface_memory_context",
+            {
             "count": len(items),
             "items": items,
-        }
+            },
+            query=context,
+        )
 
     @mcp.tool(name="search_memory")
     async def search_memory(query: str, limit: int = 10, days_back: int | None = None) -> dict[str, Any]:
         """
         Hybrid search across captured social content.
         """
-        safe_limit = max(1, min(limit, 50))
+        safe_limit = _clamp_mcp_limit(limit, hard_cap=50)
         results = await searcher.search(query=query, limit=safe_limit, days_back=days_back)
-        return {
+        return _finalize_tool_payload(
+            "search_memory",
+            {
             "query": query,
             "count": len(results),
             "results": results,
-        }
+            },
+            query=query,
+        )
 
     @mcp.tool(name="timeline_memories")
     def timeline_memories(date_str: str | None = None, platform: str | None = None, limit: int = 100) -> dict[str, Any]:
         """
         Returns timeline entries for a date, optionally filtered by platform.
         """
+        cfg = load_runtime_config()
+        if not cfg.mcp_allow_timeline:
+            return _finalize_tool_payload(
+                "timeline_memories",
+                {"count": 0, "items": [], "warning": "timeline_memories is disabled by server policy"},
+            )
         selected_date = date_str or date.today().isoformat()
         items = store.all_for_timeline(selected_date, platform)
-        safe_limit = max(1, min(limit, 500))
+        safe_limit = _clamp_mcp_limit(limit, hard_cap=500)
         trimmed = items[:safe_limit]
-        return {
+        return _finalize_tool_payload(
+            "timeline_memories",
+            {
             "date": selected_date,
             "platform": platform,
             "count": len(trimmed),
             "items": trimmed,
-        }
+            },
+            query=f"date={selected_date};platform={platform or ''}",
+        )
 
     return mcp
 

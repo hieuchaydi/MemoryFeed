@@ -1,5 +1,7 @@
 ﻿:root {
   color-scheme: light;
+  --font-sans: "Segoe UI", "Noto Sans", "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "Consolas", "SFMono-Regular", "Noto Sans Mono CJK SC", monospace;
   --bg: #f6f1e8;
   --panel: #fffaf1;
   --panel-strong: #efe6d7;
@@ -10,7 +12,20 @@
   --code: #111827;
   --code-text: #e5f7ef;
   --shadow: 0 18px 48px rgba(85, 66, 40, 0.12);
-  font-family: "Aptos", "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f171d;
+  --panel: #14212a;
+  --panel-strong: #1c2d38;
+  --text: #e8eff4;
+  --muted: #b2c0ca;
+  --line: #2b424f;
+  --accent: #57d8b5;
+  --code: #081018;
+  --code-text: #c8ffef;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
 }
 
 * {
@@ -25,15 +40,16 @@ body {
   margin: 0;
   color: var(--text);
   background:
-    radial-gradient(900px 360px at 8% -10%, rgba(23, 111, 92, 0.18), transparent 62%),
-    linear-gradient(180deg, #fbf7ef, var(--bg));
+    radial-gradient(900px 360px at 8% -10%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 72%, #ffffff), var(--bg));
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  font-family: var(--font-sans);
 }
 
 .docs-shell {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-columns: 270px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -43,14 +59,73 @@ body {
   height: 100vh;
   padding: 20px;
   border-right: 1px solid var(--line);
-  background: rgba(255, 250, 241, 0.9);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
   backdrop-filter: blur(18px);
 }
 
 .docs-logo {
   width: min(210px, 100%);
   display: block;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
+}
+
+.control-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
+  margin-bottom: 14px;
+}
+
+.control-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.segmented button,
+.theme-toggle {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button.is-active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+
+.theme-toggle {
+  width: 38px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
 }
 
 .docs-nav nav {
@@ -83,7 +158,7 @@ body {
 .docs-section {
   border: 1px solid var(--line);
   border-radius: 24px;
-  background: rgba(255, 250, 241, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   box-shadow: var(--shadow);
 }
 
@@ -142,7 +217,7 @@ body {
   border-radius: 999px;
   padding: 6px 10px;
   color: var(--accent);
-  background: #f2eadc;
+  background: color-mix(in srgb, var(--panel-strong) 70%, transparent);
   font-size: 0.84rem;
 }
 
@@ -178,7 +253,7 @@ body {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: #fbf5ea;
+  background: color-mix(in srgb, var(--panel-strong) 55%, transparent);
   padding: 14px;
 }
 
@@ -186,6 +261,17 @@ body {
 .code-panel h3 {
   margin: 0 0 8px;
   font-size: 1rem;
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.code-head h3 {
+  margin-bottom: 0;
 }
 
 .panel p {
@@ -205,8 +291,71 @@ pre {
 }
 
 code {
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.88rem;
+}
+
+.code-panel pre,
+.code-panel code,
+.command-line {
+  user-select: none;
+}
+
+.code-panel ::selection {
+  background: transparent;
+}
+
+.command-line {
+  display: block;
+  min-height: 1.45em;
+  position: relative;
+}
+
+.command-line.is-active::after {
+  content: "";
+  display: inline-block;
+  width: 0.6ch;
+  height: 1em;
+  margin-left: 0.15ch;
+  background: color-mix(in srgb, var(--code-text) 65%, transparent);
+  transform: translateY(2px);
+  animation: blink 1150ms steps(1, end) infinite;
+}
+
+@keyframes blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.copy-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-strong) 64%, transparent);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.copy-btn:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+}
+
+.copy-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .check-list {
@@ -222,7 +371,7 @@ code {
   padding: 10px 12px 10px 34px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fbf5ea;
+  background: color-mix(in srgb, var(--panel-strong) 55%, transparent);
 }
 
 .check-list li::before {
@@ -279,3 +428,4 @@ code {
     border-radius: 18px;
   }
 }
+

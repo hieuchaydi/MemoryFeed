@@ -5,11 +5,12 @@ import sqlite3
 import threading
 import hashlib
 import math
+import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-DATA_DIR = Path.home() / ".memoryfeed"
+DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"))).expanduser()
 DB_PATH = DATA_DIR / "memoryfeed.db"
 LANCEDB_DIR = DATA_DIR / "lancedb"
 IMAGE_CACHE_DIR = DATA_DIR / "images"

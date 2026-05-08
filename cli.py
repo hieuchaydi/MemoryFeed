@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from datetime import date
@@ -23,11 +24,30 @@ from backend.llm_clients import (
     check_groq_connectivity,
     providers_snapshot,
 )
+from backend.doctor import run_doctor
 from backend.native_accel import status as native_status
+from backend.runtime_config import is_public_bind_host, load_runtime_config
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, Store
+from memoryfeed.__version__ import __version__
 
 console = Console()
+
+
+def _validate_public_bind_or_exit(host: str, port: int) -> None:
+    cfg = load_runtime_config()
+    if not is_public_bind_host(host):
+        return
+    if not cfg.public_mode:
+        console.print("[red]Refusing public bind while MEMORYFEED_PUBLIC_MODE is false.[/red]")
+        console.print("Set MEMORYFEED_PUBLIC_MODE=true and retry.")
+        sys.exit(1)
+    if not cfg.admin_token:
+        console.print("[red]Refusing public bind without MEMORYFEED_ADMIN_TOKEN.[/red]")
+        console.print("Set MEMORYFEED_ADMIN_TOKEN to a long random value and retry.")
+        sys.exit(1)
+    os.environ["MEMORYFEED_BIND_HOST"] = host
+    os.environ["MEMORYFEED_BIND_PORT"] = str(port)
 
 
 @click.group()
@@ -40,6 +60,9 @@ def cli() -> None:
 @click.option("--port", default=7749, show_default=True, type=int)
 def serve(host: str, port: int) -> None:
     """Start backend server."""
+    _validate_public_bind_or_exit(host, port)
+    os.environ["MEMORYFEED_BIND_HOST"] = host
+    os.environ["MEMORYFEED_BIND_PORT"] = str(port)
     uvicorn.run("backend.server:app", host=host, port=port, reload=False)
 
 
@@ -50,6 +73,9 @@ def serve(host: str, port: int) -> None:
 @click.option("--skip-build", is_flag=True, help="Skip frontend build step")
 def serve_web(host: str, port: int, skip_frontend_install: bool, skip_build: bool) -> None:
     """Build frontend and serve public web app via FastAPI."""
+    _validate_public_bind_or_exit(host, port)
+    os.environ["MEMORYFEED_BIND_HOST"] = host
+    os.environ["MEMORYFEED_BIND_PORT"] = str(port)
     frontend_dir = Path("frontend")
     if not frontend_dir.exists():
         console.print("[red]Missing frontend directory[/red]")
@@ -315,8 +341,10 @@ def reset() -> None:
 def models() -> None:
     """Check Gemini + Groq provider connectivity."""
     snapshot = providers_snapshot()
-    gemini_ok, gemini_reason = check_gemini_connectivity(timeout_s=6.0)
-    groq_ok, groq_reason = check_groq_connectivity(timeout_s=6.0)
+    gemini_enabled = bool(snapshot["gemini"]["enabled"])
+    groq_enabled = bool(snapshot["groq"]["enabled"])
+    gemini_ok, gemini_reason = check_gemini_connectivity(timeout_s=6.0) if gemini_enabled else (True, snapshot["gemini"]["reason"])
+    groq_ok, groq_reason = check_groq_connectivity(timeout_s=6.0) if groq_enabled else (True, snapshot["groq"]["reason"])
 
     table = Table(title="LLM Providers")
     table.add_column("Provider")
@@ -328,18 +356,48 @@ def models() -> None:
     table.add_row(
         "Gemini",
         GEMINI_MODEL,
-        "yes" if snapshot["gemini"]["enabled"] else "no",
-        "yes" if gemini_ok else "no",
+        "yes" if gemini_enabled else "no",
+        "yes" if gemini_enabled and gemini_ok else ("n/a" if not gemini_enabled else "no"),
         gemini_reason,
     )
     table.add_row(
         "Groq (Qwen)",
         GROQ_MODEL,
-        "yes" if snapshot["groq"]["enabled"] else "no",
-        "yes" if groq_ok else "no",
+        "yes" if groq_enabled else "no",
+        "yes" if groq_enabled and groq_ok else ("n/a" if not groq_enabled else "no"),
         groq_reason,
     )
     console.print(table)
+
+
+@cli.command()
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"], case_sensitive=False),
+    default="text",
+    show_default=True,
+)
+def doctor(output_format: str) -> None:
+    """Run local diagnostics for security and runtime readiness."""
+    report = run_doctor()
+    if output_format.lower() == "json":
+        console.print_json(json.dumps(report, ensure_ascii=False))
+        return
+
+    console.print(f"[bold]MemoryFeed Doctor[/bold] v{__version__}")
+    console.print(f"Status: [cyan]{report['status']}[/cyan]")
+    for check in report["checks"]:
+        mark = "[green]OK[/green]" if check["ok"] else ("[yellow]WARN[/yellow]" if check["severity"] == "warning" else "[red]FAIL[/red]")
+        console.print(f"- {mark} {check['name']}: {check['message']}")
+        if (not check["ok"]) and check.get("suggested_fix"):
+            console.print(f"  fix: {check['suggested_fix']}")
+
+    cfg = report["config"]
+    console.print(
+        f"Config: offline_only={cfg['offline_only']} ai_provider={cfg['ai_provider']} "
+        f"public_mode={cfg['public_mode']} admin_token_configured={cfg['admin_token_configured']}"
+    )
 
 
 @cli.command()

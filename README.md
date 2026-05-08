@@ -7,14 +7,40 @@ MemoryFeed is a local-first social memory system:
 - Browser extension captures social posts after 3s dwell.
 - FastAPI backend stores content in SQLite (WAL) + FTS5.
 - LanceDB stores semantic vectors for multilingual search.
-- Vision pipeline (Gemini) captions images/memes asynchronously.
-- Text rewrite/summarization uses Groq with Qwen.
+- Optional vision pipeline (Gemini) captions images/memes asynchronously.
+- Optional text rewrite/summarization uses Groq with Qwen.
 - React + Vite + TypeScript frontend is the main operator console.
 - Optional C++ native acceleration speeds critical ranking/text ops.
 - Item metadata management (star/note/tags), export/import, and queue observability.
 - Active Feed ranks memories by personal heat, decay, resurfacing gap, and current context.
 
-No cloud, no API key, no data leaves your machine.
+Local-first by default. Captured data is stored locally. Optional cloud AI providers may process selected text/images only when explicitly configured.
+
+## Privacy Modes
+
+### 1. Offline / Local-only mode
+- `OFFLINE_ONLY=1`
+- `MEMORYFEED_AI_PROVIDER=none`
+- No Gemini/Groq calls are made.
+- No cloud API keys are required.
+- Capture, storage, FTS search, timeline, feed, export/import all stay local.
+
+### 2. Hybrid AI mode
+- `OFFLINE_ONLY=0`
+- `MEMORYFEED_AI_PROVIDER=auto|gemini|groq`
+- Enable only the providers you want.
+- API keys are required only for enabled providers.
+
+### 3. Data that may be sent to cloud providers in hybrid mode
+- Gemini: selected image bytes + caption prompt.
+- Groq: selected text/caption snippets for rewrite/summarization.
+- Core storage data stays local unless you explicitly export/share it.
+
+### 4. How to disable all cloud AI
+```bash
+OFFLINE_ONLY=1
+MEMORYFEED_AI_PROVIDER=none
+```
 
 ## Architecture
 
@@ -24,233 +50,135 @@ No cloud, no API key, no data leaves your machine.
 - `frontend`: React app (Search / Active Feed / Timeline / Stats).
 - `native`: pybind11 C++ module (`memoryfeed_native`) for acceleration.
 
-## Web App (React + TypeScript)
-
-Frontend stack:
-- React 19
-- Vite 8
-- TypeScript (strict mode)
-- React Query + React Router
-- Minimal responsive UI with light/dark theme and VI/EN language switch
-
-Commands:
-
-```bash
-cd frontend
-npm install
-npm run typecheck
-npm run build
-```
-
-## MCP Flow (Agent Integration)
-
-MemoryFeed includes a local MCP server so Claude/Cursor/other agents can inspect health and query memories directly.
-
-Run MCP over stdio (recommended for local MCP clients):
-
-```bash
-memoryfeed mcp --transport stdio
-```
-
-Run MCP over streamable HTTP:
-
-```bash
-memoryfeed mcp --transport streamable-http --host 127.0.0.1 --port 7748 --path /mcp
-```
-
-Available MCP tools:
-
-- `detect_stack`
-- `check_project_health`
-- `get_memoryfeed_stats`
-- `get_runtime_perf`
-- `search_memory`
-- `timeline_memories`
-- `active_memory_feed`
-- `resurface_memory_context`
-
 ## Requirements
 
 - Python 3.12+
 - Node.js 20+
-- `GEMINI_API_KEY` (vision + multimodal understanding)
-- `GROQ_API_KEY` (Qwen text model via Groq)
+
+Optional keys (hybrid mode only):
+- `GEMINI_API_KEY`
+- `GROQ_API_KEY`
 
 Optional for C++ acceleration:
-
 - Windows: Visual Studio C++ Build Tools
 - Linux/macOS: GCC/Clang with C++17
 
-## Quickstart (No Thinking)
+## Setup Modes
 
-### Windows (PowerShell) - one command
+### A. Offline basic mode (recommended for strict privacy)
 
-```powershell
-.\quickstart.ps1
-```
-
-### macOS / Linux - one command
-
+Linux/macOS:
 ```bash
+export OFFLINE_ONLY=1
+export MEMORYFEED_AI_PROVIDER=none
 bash quickstart.sh
 ```
 
-This will:
-- install Python package + frontend deps
-- validate Gemini + Groq provider connectivity
-- start backend (`:7749`) and frontend (`:5173`)
-- auto-open browser
-
-## Quickstart 60s
-
-### Local dev console
-
-```bash
-bash quickstart.sh
-```
-
-or on Windows:
-
+Windows PowerShell:
 ```powershell
+$env:OFFLINE_ONLY = "1"
+$env:MEMORYFEED_AI_PROVIDER = "none"
 .\quickstart.ps1
 ```
 
-### Public web (for other devices)
+### B. Hybrid AI mode (Gemini/Groq opt-in)
 
+Linux/macOS:
 ```bash
+export OFFLINE_ONLY=0
+export MEMORYFEED_AI_PROVIDER=auto
+export GEMINI_API_KEY="..."
+export GROQ_API_KEY="..."
+bash quickstart.sh
+```
+
+Windows PowerShell:
+```powershell
+$env:OFFLINE_ONLY = "0"
+$env:MEMORYFEED_AI_PROVIDER = "auto"
+$env:GEMINI_API_KEY = "..."
+$env:GROQ_API_KEY = "..."
+.\quickstart.ps1
+```
+
+### C. Public web mode
+
+Warning: this serves personal memory data over the network. Use only on trusted networks.
+
+Required:
+- `MEMORYFEED_PUBLIC_MODE=true`
+- `MEMORYFEED_ADMIN_TOKEN=<strong-random-token>`
+
+Linux/macOS:
+```bash
+export MEMORYFEED_PUBLIC_MODE=true
+export MEMORYFEED_ADMIN_TOKEN="replace-with-long-random-token"
 bash deploy_web.sh
 ```
 
-or on Windows:
-
+Windows PowerShell:
 ```powershell
+$env:MEMORYFEED_PUBLIC_MODE = "true"
+$env:MEMORYFEED_ADMIN_TOKEN = "replace-with-long-random-token"
 .\deploy_web.ps1
 ```
-
-### MCP for Claude/Cursor
-
-```bash
-memoryfeed mcp --transport stdio
-```
-
-### Quickstart Demo (GIF)
-
-![Quickstart Demo](docs-react/public/assets/quickstart-demo.gif)
-
-Download/open directly: `docs-react/public/assets/quickstart-demo.gif`
-
-## Public Web Deploy (React + Vite)
-
-Use this when you want other devices/people to access your web UI.
-
-### Windows
-
-```powershell
-.\deploy_web.ps1
-```
-
-### Linux/macOS
-
-```bash
-bash deploy_web.sh
-```
-
-This flow will:
-- install backend deps
-- build frontend for production (`frontend/dist`)
-- run a public server on `0.0.0.0:7749`
-- serve both API and React app from one URL
-
-Open from another device:
-- `http://<server-ip>:7749`
 
 Optional custom host/port:
+```bash
+HOST=0.0.0.0 PORT=8080 bash deploy_web.sh
+```
 
 ```powershell
 .\deploy_web.ps1 -HostIp 0.0.0.0 -Port 8080
 ```
 
+### D. MCP mode
+
+Warning: MCP can expose memory excerpts to connected agent clients.
+
+Default safety controls:
+- `MEMORYFEED_MCP_MAX_RESULTS=5`
+- `MEMORYFEED_MCP_ALLOW_TIMELINE=false`
+- `MEMORYFEED_MCP_ALLOW_ACTIVE_FEED=true`
+- `MEMORYFEED_MCP_REDACT_OUTPUT=true`
+
+Run MCP over stdio:
 ```bash
-HOST=0.0.0.0 PORT=8080 bash deploy_web.sh
+memoryfeed mcp --transport stdio
 ```
 
-## Docs React (Separate Deploy)
-
-All React documentation assets/pages are now under `docs-react/`.
-The standalone docs cover overview, quickstart, architecture, Active Feed, API, CLI, MCP, extension loading, storage/privacy, and Vercel deploy.
-
+Run MCP over streamable HTTP:
 ```bash
-cd docs-react
-npm install
-npm run build
+memoryfeed mcp --transport streamable-http --host 127.0.0.1 --port 7748 --path /mcp
 ```
-
-Deploy output folder: `docs-react/dist`
-
-Vercel settings (important):
-- Framework Preset: `Vite`
-- Root Directory: `docs-react`
-- Build Command: `npm run build`
-- Output Directory: `dist`
-- Install Command: `npm install`
-
-Detailed deploy notes: `docs-react/content/DEPLOY.md`
 
 ## Manual Setup
 
+Linux/macOS:
 ```bash
 bash setup.sh
-```
-
-Then run services:
-
-```bash
 memoryfeed serve
 cd frontend && npm run dev
+```
+
+Windows PowerShell:
+```powershell
+bash setup.sh
+memoryfeed serve
+cd frontend; npm run dev
 ```
 
 Frontend dev URL: `http://localhost:5173`  
 Backend API URL: `http://localhost:7749`
 
-## Production Frontend Build
+## Security Controls
 
-```bash
-memoryfeed build-frontend
-```
+- Admin endpoints (`/api/admin/export`, `/api/admin/import`, `/api/admin/reset`) support Bearer token auth via `MEMORYFEED_ADMIN_TOKEN`.
+- Public bind protection: CLI refuses `0.0.0.0` unless `MEMORYFEED_PUBLIC_MODE=true` and admin token is set.
+- MCP defaults to bounded results + optional output redaction and logs each tool call (`timestamp`, `tool_name`, `query`, `result_count`).
+- Extension host permissions use explicit domains only (no `https://*/*`).
 
-After build, FastAPI serves `frontend/dist` directly on `http://localhost:7749`.
-
-## Optional Native C++ Acceleration
-
-Build module:
-
-```bash
-memoryfeed build-native
-```
-
-Check status:
-
-- API: `GET /api/native/status`
-- CLI: `memoryfeed stats` (includes native status)
-
-If native build fails, project continues with Python fallback.
-
-## Extension Load
-
-### Chrome / Edge / Brave (Chromium)
-1. Open extensions page:
-- Chrome: `chrome://extensions`
-- Edge: `edge://extensions`
-- Brave: `brave://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select: `extension/chrome/`
-
-### Firefox
-1. Open `about:debugging#/runtime/this-firefox`
-2. Click **Load Temporary Add-on...**
-3. Choose: `extension/firefox/manifest.json`
-4. Keep backend running on `http://localhost:7749`
+See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 
 ## API Endpoints
 
@@ -264,9 +192,9 @@ If native build fails, project continues with Python fallback.
 - `GET /api/stats`
 - `GET /api/native/status`
 - `GET /api/queues/status`
-- `GET /api/perf` (search/indexer cache + queue diagnostics)
+- `GET /api/perf`
 - `GET /api/items?limit=&offset=&platform=&starred_only=`
-- `PATCH /api/items/{id}` (update `starred`, `note`, `tags`)
+- `PATCH /api/items/{id}`
 - `POST /api/admin/export`
 - `POST /api/admin/import`
 - `DELETE /api/admin/reset?confirm=RESET`
@@ -276,9 +204,11 @@ If native build fails, project continues with Python fallback.
 
 ```bash
 memoryfeed serve
-memoryfeed search "that angry cat meme last week"
 memoryfeed serve-web --host 0.0.0.0 --port 7749
 memoryfeed mcp --transport stdio
+memoryfeed doctor
+memoryfeed doctor --format json
+memoryfeed search "that angry cat meme last week"
 memoryfeed timeline
 memoryfeed feed --mode focus
 memoryfeed resurface "Docker networking CNI overlay Cilium"
@@ -288,7 +218,6 @@ memoryfeed items --starred
 memoryfeed export
 memoryfeed import --file ~/.memoryfeed/exports/memoryfeed-export-YYYY-MM-DD.json
 memoryfeed models
-memoryfeed perf
 memoryfeed build-native
 memoryfeed build-frontend
 memoryfeed reset
@@ -299,30 +228,48 @@ memoryfeed reset
 - `~/.memoryfeed/memoryfeed.db`
 - `~/.memoryfeed/lancedb/`
 - `~/.memoryfeed/images/`
+- `~/.memoryfeed/logs/memoryfeed.log`
 
-## Logging
+## Environment Variables
 
-- Log file (default): `~/.memoryfeed/logs/memoryfeed.log`
-- Rotating policy: 5 MB per file, 3 backups
-- Request logs include method, path, status, request id, and duration
+Core mode controls:
+- `OFFLINE_ONLY=1|0`
+- `MEMORYFEED_AI_PROVIDER=none|gemini|groq|auto`
 
-Environment variables:
+Provider keys/models:
+- `GEMINI_API_KEY=...`
+- `GROQ_API_KEY=...`
+- `MEMORYFEED_GEMINI_MODEL=gemini-2.5-flash`
+- `MEMORYFEED_GROQ_MODEL=qwen/qwen3-32b`
+- `MEMORYFEED_GROQ_REWRITE_CAPTIONS=1|0`
 
+Public/admin controls:
+- `MEMORYFEED_PUBLIC_MODE=true|false`
+- `MEMORYFEED_ADMIN_TOKEN=...`
+
+MCP controls:
+- `MEMORYFEED_MCP_MAX_RESULTS=5`
+- `MEMORYFEED_MCP_ALLOW_TIMELINE=false`
+- `MEMORYFEED_MCP_ALLOW_ACTIVE_FEED=true`
+- `MEMORYFEED_MCP_REDACT_OUTPUT=true`
+
+Logging:
 - `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`
 - `MEMORYFEED_LOG_FORMAT=plain|json`
 - `MEMORYFEED_LOG_FILE=/custom/path/memoryfeed.log`
-- `GEMINI_API_KEY=...`
-- `GROQ_API_KEY=...`
-- `MEMORYFEED_GEMINI_MODEL=gemini-2.5-flash` (optional)
-- `MEMORYFEED_GROQ_MODEL=qwen/qwen3-32b` (optional)
+
+## Version Mapping
+
+Single source of truth: `memoryfeed/__version__.py`
+
+Current mapping:
+- Python package version (pyproject/hatch): `memoryfeed/__version__.py`
+- FastAPI app version: `memoryfeed/__version__.py`
+- Extension manifests (`chrome`, `firefox`): aligned manually to the same version
 
 ## Notes
 
 - `/capture` is non-blocking: vision + embedding run in background queues.
 - Search includes short-TTL response cache with automatic invalidation on new captures.
 - Semantic query vectors use in-memory cache to reduce repeated model encodes.
-- Memories have `heat`: related captures warm old memories, daily decay cools idle memories, and `/api/feed` surfaces the highest-value items.
-- `/api/resurface` is the ambient integration hook for VS Code/Raycast/Obsidian/browser context suggestions.
 - Dedupe key = URL + first 100 chars of text.
-- If Gemini/Groq is unavailable, text capture still works and processing degrades gracefully.
-- Image captions are skipped gracefully when download/model fails.

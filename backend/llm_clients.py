@@ -8,6 +8,8 @@ from typing import Any
 import httpx
 from PIL import Image
 
+from backend.runtime_config import provider_enabled
+
 GEMINI_MODEL = os.getenv("MEMORYFEED_GEMINI_MODEL", "gemini-2.5-flash")
 GROQ_MODEL = os.getenv("MEMORYFEED_GROQ_MODEL", "qwen/qwen3-32b")
 
@@ -29,18 +31,24 @@ def groq_api_key() -> str:
 
 
 def gemini_state() -> ProviderState:
+    if not provider_enabled("gemini"):
+        return ProviderState("gemini", False, "Disabled by OFFLINE_ONLY/MEMORYFEED_AI_PROVIDER", GEMINI_MODEL)
     if not gemini_api_key():
         return ProviderState("gemini", False, "Missing GEMINI_API_KEY", GEMINI_MODEL)
     return ProviderState("gemini", True, "configured", GEMINI_MODEL)
 
 
 def groq_state() -> ProviderState:
+    if not provider_enabled("groq"):
+        return ProviderState("groq", False, "Disabled by OFFLINE_ONLY/MEMORYFEED_AI_PROVIDER", GROQ_MODEL)
     if not groq_api_key():
         return ProviderState("groq", False, "Missing GROQ_API_KEY", GROQ_MODEL)
     return ProviderState("groq", True, "configured", GROQ_MODEL)
 
 
 def caption_image_with_gemini(image_bytes: bytes, prompt: str) -> str:
+    if not provider_enabled("gemini"):
+        return ""
     key = gemini_api_key()
     if not key:
         return ""
@@ -65,6 +73,8 @@ def caption_image_with_gemini(image_bytes: bytes, prompt: str) -> str:
 
 
 def rewrite_or_summarize_with_groq(user_text: str) -> str:
+    if not provider_enabled("groq"):
+        return ""
     key = groq_api_key()
     if not key or not user_text.strip():
         return ""
@@ -97,6 +107,8 @@ def rewrite_or_summarize_with_groq(user_text: str) -> str:
 
 
 def check_gemini_connectivity(timeout_s: float = 8.0) -> tuple[bool, str]:
+    if not provider_enabled("gemini"):
+        return True, "Disabled by OFFLINE_ONLY/MEMORYFEED_AI_PROVIDER"
     key = gemini_api_key()
     if not key:
         return False, "Missing GEMINI_API_KEY"
@@ -111,6 +123,8 @@ def check_gemini_connectivity(timeout_s: float = 8.0) -> tuple[bool, str]:
 
 
 def check_groq_connectivity(timeout_s: float = 8.0) -> tuple[bool, str]:
+    if not provider_enabled("groq"):
+        return True, "Disabled by OFFLINE_ONLY/MEMORYFEED_AI_PROVIDER"
     key = groq_api_key()
     if not key:
         return False, "Missing GROQ_API_KEY"

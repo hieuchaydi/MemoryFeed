@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from datetime import date
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any
 import json
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.responses import FileResponse
@@ -29,9 +30,11 @@ from backend.models import (
     SurfaceItemsRequest,
 )
 from backend.native_accel import status as native_status
+from backend.runtime_config import is_localhost_client, load_runtime_config
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, IMAGE_CACHE_DIR, Store
 from backend.vision import VisionService
+from memoryfeed.__version__ import __version__
 
 configure_logging()
 logger = logging.getLogger("memoryfeed")
@@ -39,7 +42,7 @@ logger = logging.getLogger("memoryfeed")
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
-app = FastAPI(title="MemoryFeed", version="0.2.0")
+app = FastAPI(title="MemoryFeed", version=__version__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,6 +68,38 @@ interest = InterestEngine(store, searcher)
 
 if IMAGE_CACHE_DIR.exists():
     app.mount("/images", StaticFiles(directory=str(IMAGE_CACHE_DIR)), name="images")
+
+
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    value = authorization.strip()
+    if not value.lower().startswith("bearer "):
+        return None
+    token = value[7:].strip()
+    return token or None
+
+
+def require_sensitive_access(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    cfg = load_runtime_config()
+    if cfg.admin_token:
+        provided = _extract_bearer_token(authorization)
+        if provided != cfg.admin_token:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid admin token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return
+
+    if not is_localhost_client(request.client.host if request.client else None):
+        raise HTTPException(
+            status_code=403,
+            detail="Admin endpoints are disabled for non-local clients when MEMORYFEED_ADMIN_TOKEN is not set",
+        )
 
 
 @app.middleware("http")
@@ -100,6 +135,14 @@ async def request_logging_middleware(request: Request, call_next) -> Response:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    cfg = load_runtime_config()
+    bind_host = os.getenv("MEMORYFEED_BIND_HOST", "").strip()
+    if bind_host and bind_host not in {"127.0.0.1", "localhost", "::1"} and not cfg.admin_token:
+        logger.warning(
+            "public_bind_without_admin_token host=%s public_mode=%s",
+            bind_host,
+            cfg.public_mode,
+        )
     await indexer.start()
     await vision.start()
     logger.info("MemoryFeed started data_dir=%s", store.db_path.parent)
@@ -251,7 +294,7 @@ async def patch_item_api(item_id: str, payload: ItemMetaPatch) -> dict[str, Any]
 
 
 @app.post("/api/admin/export")
-async def export_data_api() -> dict[str, Any]:
+async def export_data_api(_auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
     items = await asyncio.to_thread(store.export_items)
     export_path = DATA_DIR / "exports"
     export_path.mkdir(parents=True, exist_ok=True)
@@ -261,7 +304,7 @@ async def export_data_api() -> dict[str, Any]:
 
 
 @app.post("/api/admin/import")
-async def import_data_api(payload: ImportPayload) -> dict[str, Any]:
+async def import_data_api(payload: ImportPayload, _auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
     inserted = 0
     duplicates = 0
     enqueued_vision = 0
@@ -294,7 +337,10 @@ async def import_data_api(payload: ImportPayload) -> dict[str, Any]:
 
 
 @app.delete("/api/admin/reset")
-async def reset_data_api(confirm: str = Query(default="")) -> dict[str, Any]:
+async def reset_data_api(
+    confirm: str = Query(default=""),
+    _auth: None = Depends(require_sensitive_access),
+) -> dict[str, Any]:
     if confirm != "RESET":
         raise HTTPException(status_code=400, detail="Set confirm=RESET to proceed")
     await asyncio.to_thread(store.delete_all)

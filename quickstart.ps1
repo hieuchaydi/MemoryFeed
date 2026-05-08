@@ -22,18 +22,6 @@ Write-Host "[1/5] Checking prerequisites..." -ForegroundColor Cyan
 python --version | Out-Null
 npm -v | Out-Null
 
-if (-not $env:GEMINI_API_KEY) {
-  Write-Host "Missing GEMINI_API_KEY" -ForegroundColor Red
-  Write-Host 'Set it first: $env:GEMINI_API_KEY = "your_key"' -ForegroundColor Yellow
-  exit 1
-}
-
-if (-not $env:GROQ_API_KEY) {
-  Write-Host "Missing GROQ_API_KEY" -ForegroundColor Red
-  Write-Host 'Set it first: $env:GROQ_API_KEY = "your_key"' -ForegroundColor Yellow
-  exit 1
-}
-
 Write-Host "[2/5] Installing Python package..." -ForegroundColor Cyan
 python -m pip install -e .
 
@@ -42,8 +30,8 @@ Push-Location frontend
 npm install
 Pop-Location
 
-Write-Host "[4/5] Checking LLM providers..." -ForegroundColor Cyan
-memoryfeed models
+Write-Host "[4/5] Running local health checks..." -ForegroundColor Cyan
+memoryfeed doctor
 
 Write-Host "[5/5] Starting services..." -ForegroundColor Cyan
 $backend = Start-Process -FilePath "cmd.exe" -ArgumentList "/c memoryfeed serve" -PassThru -WindowStyle Hidden

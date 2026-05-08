@@ -4,7 +4,6 @@ const resultsEl = document.getElementById("results");
 const debugBox = document.getElementById("debugBox");
 const btnSelfTest = document.getElementById("btnSelfTest");
 const btnCaptureNow = document.getElementById("btnCaptureNow");
-const btnGrantTikTok = document.getElementById("btnGrantTikTok");
 const btnRefreshDebug = document.getElementById("btnRefreshDebug");
 const ext = typeof browser !== "undefined" ? browser : chrome;
 
@@ -133,30 +132,5 @@ btnCaptureNow.addEventListener("click", () => {
   });
 });
 
-btnGrantTikTok.addEventListener("click", () => {
-  if (!ext.permissions || !ext.permissions.request) {
-    debugBox.textContent = "Trình duyệt không hỗ trợ permissions.request.";
-    return;
-  }
-  ext.permissions.request(
-    {
-      origins: [
-        "https://www.tiktok.com/*",
-        "https://tiktok.com/*",
-        "https://m.tiktok.com/*",
-        "https://*.tiktok.com/*",
-      ],
-    },
-    (granted) => {
-      if (chrome.runtime.lastError) {
-        debugBox.textContent = `Lỗi phân quyền: ${chrome.runtime.lastError.message}`;
-        return;
-      }
-      debugBox.textContent = granted
-        ? "Đã cấp quyền TikTok. Tải lại tab TikTok rồi thử lại."
-        : "Bạn chưa cấp quyền TikTok.";
-    }
-  );
-});
 
 void refreshDebugStatus();
