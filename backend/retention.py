@@ -25,10 +25,12 @@ def compute_decay(
     surfaced_count = int(item.get("surfaced_count") or 0)
     starred = bool(item.get("starred"))
     important = float(item.get("heat") or 1.0) >= 2.5 or starred
+    memory_type = str(item.get("memory_type") or _infer_memory_type(item)).lower()
 
     adjustment = 1.0 + min(1.5, surfaced_count * 0.06)
     if important:
         adjustment += 0.7
+    adjustment *= _type_half_life_multiplier(memory_type)
     adjusted_half_life = max(7.0, float(half_life_days) * adjustment)
 
     decay_score = 1.0 - math.exp(-math.log(2.0) * (age_days / adjusted_half_life))
@@ -43,3 +45,34 @@ def compute_decay(
     else:
         state = "active"
     return float(round(decay_score, 6)), state
+
+
+def _type_half_life_multiplier(memory_type: str) -> float:
+    if memory_type == "fact":
+        return 1.8
+    if memory_type == "preference":
+        return 1.4
+    if memory_type == "task":
+        return 1.1
+    if memory_type == "intent":
+        return 1.0
+    if memory_type == "episode":
+        return 0.85
+    return 0.75
+
+
+def _infer_memory_type(item: dict) -> str:
+    tags = [str(v).lower() for v in (item.get("tags") or [])]
+    text = str(item.get("text_content") or "").lower()
+    content_type = str(item.get("content_type") or "").lower()
+    if "fact" in tags:
+        return "fact"
+    if "preference" in tags:
+        return "preference"
+    if "task" in tags or "todo" in text:
+        return "task"
+    if "intent" in tags:
+        return "intent"
+    if content_type in {"video", "image"}:
+        return "episode"
+    return "ephemeral"

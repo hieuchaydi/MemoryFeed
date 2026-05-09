@@ -35,6 +35,7 @@ class RuntimeConfig:
     memory_retention_days: int
     memory_auto_archive: bool
     memory_archive_low_score_threshold: float
+    memory_namespace: str
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -125,6 +126,7 @@ def load_runtime_config() -> RuntimeConfig:
         memory_retention_days=env_int("MEMORY_RETENTION_DAYS", default=90, min_value=7, max_value=3650),
         memory_auto_archive=env_flag("MEMORY_AUTO_ARCHIVE", default=False),
         memory_archive_low_score_threshold=env_float("MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD", default=0.25, min_value=0.0, max_value=5.0),
+        memory_namespace=(os.getenv("MEMORYFEED_NAMESPACE", "default").strip() or "default"),
     )
 
 

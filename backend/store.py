@@ -165,12 +165,14 @@ class Store:
                 self._ensure_column(conn, "items", "resurfacing_score", "REAL DEFAULT 0.0")
                 self._ensure_column(conn, "items", "recency_score", "REAL DEFAULT 0.0")
                 self._ensure_column(conn, "items", "recurrence_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "namespace", "TEXT DEFAULT 'default'")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_heat ON items(heat);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_archived_at ON items(archived_at);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_canonical_url ON items(canonical_url);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_post_id ON items(post_id);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_search_hidden ON items(search_hidden);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_index_dirty ON items(index_dirty);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_namespace ON items(namespace);")
                 conn.commit()
             finally:
                 conn.close()
@@ -220,8 +222,8 @@ class Store:
                         related_topics, related_entities, semantic_group,
                         prompt_risk_score, prompt_risk_reason,
                         sensitivity_level, sensitivity_reasons,
-                        embedding_skipped, search_hidden, index_dirty, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        embedding_skipped, search_hidden, index_dirty, updated_at, namespace
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"],
@@ -270,6 +272,7 @@ class Store:
                         int(bool(item.get("search_hidden", 0))),
                         int(bool(item.get("index_dirty", 1))),
                         item.get("updated_at", now_iso()),
+                        item.get("namespace", "default"),
                     ),
                 )
             if fail_after_write:
@@ -320,6 +323,7 @@ class Store:
         out.setdefault("content_type", "post")
         out.setdefault("platform", "unknown")
         out.setdefault("text_content", "")
+        out.setdefault("namespace", cfg.memory_namespace)
 
         if not out.get("dedupe_key"):
             canonical = out.get("canonical_url") or out.get("url") or ""
@@ -330,7 +334,7 @@ class Store:
                 bucket = str(int(dt.timestamp() // (2 * 60 * 60)))
             except Exception:
                 bucket = str(captured_at)[:13]
-            seed = f"{canonical}|{str(out.get('text_content', ''))[:240]}|{author_name[:100]}|{bucket}".encode(
+            seed = f"{out.get('namespace','default')}|{canonical}|{str(out.get('text_content', ''))[:240]}|{author_name[:100]}|{bucket}".encode(
                 "utf-8", errors="ignore"
             )
             out["dedupe_key"] = hashlib.sha256(seed).hexdigest()
@@ -395,9 +399,13 @@ class Store:
         return out
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
-            row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM items WHERE id = ? AND COALESCE(namespace, 'default') = ?",
+                (item_id, cfg.memory_namespace),
+            ).fetchone()
             return self._row_to_item(row) if row else None
         finally:
             conn.close()
@@ -610,7 +618,8 @@ class Store:
         try:
             normalized_query = _build_safe_fts_query(query)
             params: list[Any] = [normalized_query]
-            where = "AND items.archived_at IS NULL"
+            where = "AND items.archived_at IS NULL AND COALESCE(items.namespace, 'default') = ?"
+            params.append(cfg.memory_namespace)
             if cfg.hide_sensitive_from_search:
                 where += " AND COALESCE(items.search_hidden, 0) = 0"
             if days_back is not None:
@@ -655,10 +664,11 @@ class Store:
             conn.close()
 
     def all_for_timeline(self, date_str: str, platform: str | None = None) -> list[dict[str, Any]]:
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
-            where = "DATE(captured_at) = DATE(?)"
-            params: list[Any] = [date_str]
+            where = "DATE(captured_at) = DATE(?) AND COALESCE(namespace, 'default') = ?"
+            params: list[Any] = [date_str, cfg.memory_namespace]
             if platform:
                 where += " AND platform = ?"
                 params.append(platform)
@@ -676,22 +686,33 @@ class Store:
             conn.close()
 
     def stats(self) -> dict[str, Any]:
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
-            total = int(conn.execute("SELECT COUNT(*) FROM items").fetchone()[0])
+            total = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE COALESCE(namespace, 'default') = ?",
+                    (cfg.memory_namespace,),
+                ).fetchone()[0]
+            )
             today = int(
-                conn.execute("SELECT COUNT(*) FROM items WHERE DATE(captured_at)=DATE('now', 'localtime')").fetchone()[0]
+                conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE COALESCE(namespace, 'default') = ? AND DATE(captured_at)=DATE('now', 'localtime')",
+                    (cfg.memory_namespace,),
+                ).fetchone()[0]
             )
             by_platform = [
                 {"key": row[0], "count": int(row[1])}
                 for row in conn.execute(
-                    "SELECT platform, COUNT(*) FROM items GROUP BY platform ORDER BY COUNT(*) DESC"
+                    "SELECT platform, COUNT(*) FROM items WHERE COALESCE(namespace, 'default') = ? GROUP BY platform ORDER BY COUNT(*) DESC",
+                    (cfg.memory_namespace,),
                 ).fetchall()
             ]
             by_type = [
                 {"key": row[0], "count": int(row[1])}
                 for row in conn.execute(
-                    "SELECT content_type, COUNT(*) FROM items GROUP BY content_type ORDER BY COUNT(*) DESC"
+                    "SELECT content_type, COUNT(*) FROM items WHERE COALESCE(namespace, 'default') = ? GROUP BY content_type ORDER BY COUNT(*) DESC",
+                    (cfg.memory_namespace,),
                 ).fetchall()
             ]
             return {
@@ -699,15 +720,20 @@ class Store:
                 "today": today,
                 "by_platform": by_platform,
                 "by_type": by_type,
+                "namespace": cfg.memory_namespace,
             }
         finally:
             conn.close()
 
     def count_today(self) -> int:
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
             return int(
-                conn.execute("SELECT COUNT(*) FROM items WHERE DATE(captured_at)=DATE('now', 'localtime')").fetchone()[0]
+                conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE COALESCE(namespace, 'default') = ? AND DATE(captured_at)=DATE('now', 'localtime')",
+                    (cfg.memory_namespace,),
+                ).fetchone()[0]
             )
         finally:
             conn.close()
@@ -727,9 +753,13 @@ class Store:
             conn.close()
 
     def all_items(self) -> list[dict[str, Any]]:
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
-            rows = conn.execute("SELECT * FROM items ORDER BY captured_at DESC").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM items WHERE COALESCE(namespace, 'default') = ? ORDER BY captured_at DESC",
+                (cfg.memory_namespace,),
+            ).fetchall()
             return [self._row_to_item(row) for row in rows]
         finally:
             conn.close()
@@ -742,9 +772,12 @@ class Store:
         starred_only: bool = False,
     ) -> list[dict[str, Any]]:
         conn = self._connect()
+        cfg = load_runtime_config()
         try:
             where = []
             params: list[Any] = []
+            where.append("COALESCE(namespace, 'default') = ?")
+            params.append(cfg.memory_namespace)
             if platform:
                 where.append("platform = ?")
                 params.append(platform)
@@ -778,9 +811,13 @@ class Store:
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
-            rows = conn.execute(f"SELECT * FROM items WHERE id IN ({placeholders})", ids).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM items WHERE id IN ({placeholders}) AND COALESCE(namespace, 'default') = ?",
+                [*ids, cfg.memory_namespace],
+            ).fetchall()
             out: dict[str, dict[str, Any]] = {}
             for row in rows:
                 item = self._row_to_item(row)
@@ -799,10 +836,11 @@ class Store:
                 FROM items
                 WHERE COALESCE(index_dirty, 0) = 1
                   AND COALESCE(embedding_skipped, 0) = 0
+                  AND COALESCE(namespace, 'default') = ?
                 ORDER BY COALESCE(updated_at, captured_at) ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (load_runtime_config().memory_namespace, limit),
             ).fetchall()
             return [self._row_to_item(row) for row in rows]
         finally:
@@ -839,6 +877,7 @@ class Store:
         cfg = load_runtime_config()
         threshold = float(cfg.memory_dedupe_similarity_threshold)
         platform = str(item.get("platform") or "unknown")
+        namespace = str(item.get("namespace") or cfg.memory_namespace)
         conn = self._connect()
         try:
             rows = conn.execute(
@@ -846,10 +885,11 @@ class Store:
                 SELECT id, text_content
                 FROM items
                 WHERE platform = ?
+                  AND COALESCE(namespace, 'default') = ?
                 ORDER BY captured_at DESC
                 LIMIT 120
                 """,
-                (platform,),
+                (platform, namespace),
             ).fetchall()
             for row in rows:
                 score = semantic_similarity(text, str(row["text_content"] or ""))
@@ -975,6 +1015,7 @@ class Store:
             "extractor_version": row["extractor_version"] if "extractor_version" in row.keys() and row["extractor_version"] else capture_debug.get("_extractor_version"),
             "capture_source": row["capture_source"] if "capture_source" in row.keys() and row["capture_source"] else capture_debug.get("_capture_source"),
             "replay_source": row["replay_source"] if "replay_source" in row.keys() and row["replay_source"] else capture_debug.get("_replay_source"),
+            "namespace": row["namespace"] if "namespace" in row.keys() and row["namespace"] else "default",
             "suspicious_prompt_content": (
                 (bool(row["suspicious_prompt_content"]) if "suspicious_prompt_content" in row.keys() else False)
                 or bool(capture_debug.get("_suspicious_prompt_content"))
@@ -1016,6 +1057,7 @@ class Store:
             "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 1.0,
             "canonical_url": row["canonical_url"] if "canonical_url" in row.keys() else row["url"],
             "sensitivity_level": row["sensitivity_level"] if "sensitivity_level" in row.keys() else "none",
+            "namespace": row["namespace"] if "namespace" in row.keys() and row["namespace"] else "default",
         }
 
 

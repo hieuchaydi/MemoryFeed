@@ -206,6 +206,7 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
     memory_id = lifecycle.ensure_memory_for_item(item)
     lifecycle.summarize_memory(memory_id, str(item.get("text_content") or ""))
     lifecycle.apply_decay_cycle(item)
+    lifecycle.infer_relations_for_item(item)
     if item.get("image_urls"):
         await vision.enqueue(item["id"])
     else:

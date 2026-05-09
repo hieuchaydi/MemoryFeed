@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.retention import compute_decay
+from backend.runtime_config import load_runtime_config
 
 
 MEMORY_STATES = {
@@ -62,6 +63,7 @@ class MemoryLifecycleEngine:
                 CREATE TABLE IF NOT EXISTS memory_nodes (
                     memory_id TEXT PRIMARY KEY,
                     item_id TEXT,
+                    namespace TEXT DEFAULT 'default',
                     state TEXT NOT NULL,
                     memory_type TEXT NOT NULL,
                     summary_short TEXT,
@@ -107,6 +109,12 @@ class MemoryLifecycleEngine:
                 );
                 """
             )
+            try:
+                conn.execute("ALTER TABLE memory_nodes ADD COLUMN namespace TEXT DEFAULT 'default'")
+            except Exception:
+                pass
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_nodes_namespace ON memory_nodes(namespace);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_nodes_type ON memory_nodes(memory_type);")
             conn.commit()
 
     def _event(self, conn: sqlite3.Connection, memory_id: str, event_type: str, payload: dict[str, Any] | None = None) -> str:
@@ -120,16 +128,18 @@ class MemoryLifecycleEngine:
     def ensure_memory_for_item(self, item: dict[str, Any]) -> str:
         memory_id = f"mem:{item['id']}"
         now = self._now()
+        namespace = str(item.get("namespace") or "default")
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO memory_nodes(memory_id, item_id, state, memory_type, confidence, importance_score, created_at, updated_at)
-                VALUES(?, ?, 'captured', ?, ?, ?, ?, ?)
+                INSERT INTO memory_nodes(memory_id, item_id, namespace, state, memory_type, confidence, importance_score, created_at, updated_at)
+                VALUES(?, ?, ?, 'captured', ?, ?, ?, ?, ?)
                 ON CONFLICT(memory_id) DO NOTHING
                 """,
                 (
                     memory_id,
                     item["id"],
+                    namespace,
                     _memory_type(item),
                     float(item.get("capture_confidence") or 1.0),
                     float(item.get("importance_score") or 0.0),
@@ -137,7 +147,12 @@ class MemoryLifecycleEngine:
                     now,
                 ),
             )
+            conn.execute(
+                "UPDATE memory_nodes SET state='normalized', updated_at=? WHERE memory_id=?",
+                (now, memory_id),
+            )
             self._event(conn, memory_id, "capture", {"item_id": item["id"]})
+            self._event(conn, memory_id, "normalize", {"namespace": namespace})
             conn.commit()
         return memory_id
 
@@ -155,6 +170,8 @@ class MemoryLifecycleEngine:
                 (short, medium, long, self._now(), memory_id),
             )
             self._event(conn, memory_id, "summarize", {"len": len(text or "")})
+            conn.execute("UPDATE memory_nodes SET state='indexed', updated_at=? WHERE memory_id=?", (self._now(), memory_id))
+            self._event(conn, memory_id, "index", {"strategy": "fts+vector"})
             conn.commit()
 
     def reinforce_memory(self, memory_id: str, delta: float = 0.1) -> None:
@@ -213,6 +230,44 @@ class MemoryLifecycleEngine:
             conn.commit()
         return edge_id
 
+    def infer_relations_for_item(self, item: dict[str, Any], max_candidates: int = 40) -> list[dict[str, Any]]:
+        memory_id = f"mem:{item['id']}"
+        namespace = str(item.get("namespace") or "default")
+        entities = {str(e).lower() for e in (item.get("related_entities") or []) if str(e).strip()}
+        topics = {str(t).lower() for t in (item.get("related_topics") or []) if str(t).strip()}
+        semantic_group = str(item.get("semantic_group") or "").strip().lower()
+        text = str(item.get("text_content") or "").lower()
+        out: list[dict[str, Any]] = []
+
+        with self._connect() as conn:
+            candidates = conn.execute(
+                """
+                SELECT memory_id, summary_long, memory_type
+                FROM memory_nodes
+                WHERE memory_id != ?
+                  AND COALESCE(namespace, 'default') = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (memory_id, namespace, int(max_candidates)),
+            ).fetchall()
+            for row in candidates:
+                other_id = str(row["memory_id"])
+                other_text = str(row["summary_long"] or "").lower()
+                rel = _infer_relation(entities, topics, semantic_group, text, other_text)
+                if not rel:
+                    continue
+                edge_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT OR IGNORE INTO memory_edges(edge_id, from_memory_id, to_memory_id, relation, confidence, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                    (edge_id, memory_id, other_id, rel["relation"], rel["confidence"], self._now()),
+                )
+                out.append({"edge_id": edge_id, "to_memory_id": other_id, **rel})
+            if out:
+                self._event(conn, memory_id, "relation_infer", {"edges": len(out)})
+            conn.commit()
+        return out
+
     def report_conflict(
         self,
         memory_id: str,
@@ -255,10 +310,18 @@ class MemoryLifecycleEngine:
         return conflict_id
 
     def timeline(self, limit: int = 200) -> list[dict[str, Any]]:
+        namespace = load_runtime_config().memory_namespace
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT event_id, memory_id, event_type, payload, created_at FROM memory_events ORDER BY created_at DESC LIMIT ?",
-                (int(limit),),
+                """
+                SELECT event_id, memory_id, event_type, payload, created_at
+                FROM memory_events
+                WHERE memory_id IN (
+                    SELECT memory_id FROM memory_nodes WHERE COALESCE(namespace, 'default') = ?
+                )
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                (namespace, int(limit)),
             ).fetchall()
             return [
                 {
@@ -272,6 +335,7 @@ class MemoryLifecycleEngine:
             ]
 
     def heatmap(self, bucket_days: int = 7) -> list[dict[str, Any]]:
+        namespace = load_runtime_config().memory_namespace
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -282,9 +346,11 @@ class MemoryLifecycleEngine:
                     AVG(reinforcement) as avg_reinforcement,
                     AVG(decay_score) as avg_decay
                 FROM memory_nodes
+                WHERE COALESCE(namespace, 'default') = ?
                 GROUP BY day, state
                 ORDER BY day DESC
-                """
+                """,
+                (namespace,),
             ).fetchall()
             return [
                 {
@@ -299,10 +365,17 @@ class MemoryLifecycleEngine:
             ]
 
     def reinforcement_graph(self, limit: int = 300) -> dict[str, Any]:
+        namespace = load_runtime_config().memory_namespace
         with self._connect() as conn:
             nodes = conn.execute(
-                "SELECT memory_id, state, reinforcement, decay_score, importance_score FROM memory_nodes ORDER BY updated_at DESC LIMIT ?",
-                (int(limit),),
+                """
+                SELECT memory_id, state, reinforcement, decay_score, importance_score
+                FROM memory_nodes
+                WHERE COALESCE(namespace, 'default') = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (namespace, int(limit)),
             ).fetchall()
             edges = conn.execute(
                 "SELECT edge_id, from_memory_id, to_memory_id, relation, confidence FROM memory_edges ORDER BY created_at DESC LIMIT ?",
@@ -332,15 +405,17 @@ class MemoryLifecycleEngine:
         }
 
     def aging(self, limit: int = 200) -> list[dict[str, Any]]:
+        namespace = load_runtime_config().memory_namespace
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT memory_id, state, decay_score, reinforcement, importance_score, last_accessed_at, forgotten_at, updated_at
                 FROM memory_nodes
+                WHERE COALESCE(namespace, 'default') = ?
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
-                (int(limit),),
+                (namespace, int(limit)),
             ).fetchall()
             return [
                 {
@@ -397,3 +472,23 @@ def _next_action(decay_score: float, state: str) -> str:
     if decay_score >= 0.45:
         return "review"
     return "retain"
+
+
+def _infer_relation(
+    entities: set[str],
+    topics: set[str],
+    semantic_group: str,
+    text: str,
+    other_text: str,
+) -> dict[str, Any] | None:
+    shared_entities = [e for e in entities if e and e in other_text]
+    shared_topics = [t for t in topics if t and t in other_text]
+    contradict_markers = (" but ", " however ", " contradict", " conflict", " changed ")
+
+    if semantic_group and semantic_group in other_text:
+        return {"relation": "same_as", "confidence": 0.86}
+    if shared_entities and any(marker in text + " " + other_text for marker in contradict_markers):
+        return {"relation": "contradicts", "confidence": 0.72}
+    if shared_entities or shared_topics:
+        return {"relation": "supports", "confidence": 0.66}
+    return None

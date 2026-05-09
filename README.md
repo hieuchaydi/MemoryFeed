@@ -287,6 +287,7 @@ memoryfeed reset
 Core mode controls:
 - `OFFLINE_ONLY=1|0`
 - `MEMORYFEED_AI_PROVIDER=none|gemini|groq|auto`
+- `MEMORYFEED_NAMESPACE=default|work|personal|project-x`
 
 Provider keys/models:
 - `GEMINI_API_KEY=...`
