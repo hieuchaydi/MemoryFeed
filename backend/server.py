@@ -26,6 +26,7 @@ from backend.benchmarking import evaluate_memory_retrieval, load_default_benchma
 from backend.logging_setup import configure_logging
 from backend.maintenance import MaintenanceScheduler
 from backend.memory_lifecycle import MemoryLifecycleEngine
+from backend.llm_clients import provider_runtime_state
 from backend.privacy_guard import verify_local_only_mode
 from backend.models import (
     ArchiveItemsRequest,
@@ -76,6 +77,8 @@ interest = InterestEngine(store, searcher)
 maintenance = MaintenanceScheduler(store)
 lifecycle = MemoryLifecycleEngine(store.db_path)
 capture_metrics = collections.defaultdict(lambda: {"attempts": 0, "stored": 0, "duplicates": 0, "missing": 0})
+rate_limit_windows: dict[str, collections.deque[float]] = collections.defaultdict(collections.deque)
+rate_limit_lock = asyncio.Lock()
 
 if IMAGE_CACHE_DIR.exists():
     app.mount("/images", StaticFiles(directory=str(IMAGE_CACHE_DIR)), name="images")
@@ -115,6 +118,23 @@ def require_sensitive_access(
 
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next) -> Response:
+    cfg = load_runtime_config()
+    if cfg.api_rate_limit_enabled and request.url.path.startswith("/api/"):
+        client_host = request.client.host if request.client else "unknown"
+        key = f"{client_host}:{request.url.path}"
+        now_mono = time.monotonic()
+        async with rate_limit_lock:
+            window = rate_limit_windows[key]
+            while window and (now_mono - window[0]) > cfg.api_rate_limit_window_seconds:
+                window.popleft()
+            if len(window) >= cfg.api_rate_limit_requests:
+                return Response(
+                    content='{"detail":"rate limit exceeded"}',
+                    status_code=429,
+                    media_type="application/json",
+                )
+            window.append(now_mono)
+
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     start = time.perf_counter()
     try:
@@ -415,6 +435,7 @@ async def perf_api() -> dict[str, Any]:
         "indexer": indexer.status(),
         "vision": vision.status(),
         "native": native_status(),
+        "providers": provider_runtime_state(),
     }
 
 
@@ -530,6 +551,21 @@ async def reset_data_api(
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz() -> dict[str, Any]:
+    index_status = indexer.status()
+    vision_status = vision.status()
+    ready = bool(index_status.get("running")) and bool(vision_status.get("running"))
+    return {
+        "ready": ready,
+        "queues": {
+            "indexer": index_status,
+            "vision": vision_status,
+        },
+        "providers": provider_runtime_state(),
+    }
 
 
 @app.get("/{full_path:path}")

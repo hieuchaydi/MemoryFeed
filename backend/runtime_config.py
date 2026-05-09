@@ -36,6 +36,14 @@ class RuntimeConfig:
     memory_auto_archive: bool
     memory_archive_low_score_threshold: float
     memory_namespace: str
+    queue_retry_max_attempts: int
+    queue_retry_base_delay_seconds: float
+    queue_retry_max_delay_seconds: float
+    provider_circuit_breaker_failures: int
+    provider_circuit_breaker_cooldown_seconds: int
+    api_rate_limit_enabled: bool
+    api_rate_limit_requests: int
+    api_rate_limit_window_seconds: int
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -127,6 +135,14 @@ def load_runtime_config() -> RuntimeConfig:
         memory_auto_archive=env_flag("MEMORY_AUTO_ARCHIVE", default=False),
         memory_archive_low_score_threshold=env_float("MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD", default=0.25, min_value=0.0, max_value=5.0),
         memory_namespace=(os.getenv("MEMORYFEED_NAMESPACE", "default").strip() or "default"),
+        queue_retry_max_attempts=env_int("MEMORY_QUEUE_RETRY_MAX_ATTEMPTS", default=4, min_value=1, max_value=20),
+        queue_retry_base_delay_seconds=env_float("MEMORY_QUEUE_RETRY_BASE_DELAY_SECONDS", default=0.8, min_value=0.1, max_value=60.0),
+        queue_retry_max_delay_seconds=env_float("MEMORY_QUEUE_RETRY_MAX_DELAY_SECONDS", default=20.0, min_value=0.5, max_value=600.0),
+        provider_circuit_breaker_failures=env_int("MEMORY_PROVIDER_CB_FAILURES", default=5, min_value=1, max_value=50),
+        provider_circuit_breaker_cooldown_seconds=env_int("MEMORY_PROVIDER_CB_COOLDOWN_SECONDS", default=30, min_value=1, max_value=3600),
+        api_rate_limit_enabled=env_flag("MEMORY_API_RATE_LIMIT_ENABLED", default=True),
+        api_rate_limit_requests=env_int("MEMORY_API_RATE_LIMIT_REQUESTS", default=120, min_value=10, max_value=5000),
+        api_rate_limit_window_seconds=env_int("MEMORY_API_RATE_LIMIT_WINDOW_SECONDS", default=60, min_value=1, max_value=3600),
     )
 
 

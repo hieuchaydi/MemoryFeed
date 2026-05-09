@@ -11,6 +11,8 @@ import httpx
 
 from backend.indexer import IndexerService
 from backend.llm_clients import caption_image_with_gemini, rewrite_or_summarize_with_groq
+from backend.resilience import backoff_seconds
+from backend.runtime_config import load_runtime_config
 from backend.store import IMAGE_CACHE_DIR, Store
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,9 @@ class VisionService:
         self._running = False
         self._processed = 0
         self._failed = 0
+        self._retried = 0
+        self._dead_letter = 0
+        self._attempts: dict[str, int] = {}
 
     async def start(self) -> None:
         if self._running:
@@ -55,16 +60,36 @@ class VisionService:
             logger.warning("Vision queue full. Dropping item_id=%s", item_id)
 
     async def _worker(self) -> None:
+        cfg = load_runtime_config()
         while self._running:
             item_id = await self.queue.get()
             try:
                 await self.process_item(item_id)
                 self._processed += 1
+                self._attempts.pop(item_id, None)
             except Exception as exc:
                 self._failed += 1
-                logger.exception("Vision processing failed for %s: %s", item_id, exc)
+                attempt = int(self._attempts.get(item_id, 0)) + 1
+                self._attempts[item_id] = attempt
+                if attempt < cfg.queue_retry_max_attempts:
+                    self._retried += 1
+                    delay = backoff_seconds(
+                        attempt=attempt,
+                        base=cfg.queue_retry_base_delay_seconds,
+                        cap=cfg.queue_retry_max_delay_seconds,
+                    )
+                    logger.warning("vision_retry item_id=%s attempt=%s delay_s=%.3f error=%s", item_id, attempt, delay, exc)
+                    asyncio.create_task(self._requeue_after(item_id, delay))
+                else:
+                    self._dead_letter += 1
+                    self._attempts.pop(item_id, None)
+                    logger.exception("vision_dead_letter item_id=%s attempts=%s error=%s", item_id, attempt, exc)
             finally:
                 self.queue.task_done()
+
+    async def _requeue_after(self, item_id: str, delay_seconds: float) -> None:
+        await asyncio.sleep(max(0.0, delay_seconds))
+        await self.enqueue(item_id)
 
     async def process_item(self, item_id: str) -> None:
         item = await asyncio.to_thread(self.store.get_item, item_id)
@@ -134,6 +159,8 @@ class VisionService:
             "queue_size": self.queue.qsize(),
             "processed": self._processed,
             "failed": self._failed,
+            "retried": self._retried,
+            "dead_letter": self._dead_letter,
         }
 
 

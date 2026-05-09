@@ -9,9 +9,22 @@ import httpx
 from PIL import Image
 
 from backend.runtime_config import provider_enabled
+from backend.resilience import CircuitBreaker
+from backend.runtime_config import load_runtime_config
 
 GEMINI_MODEL = os.getenv("MEMORYFEED_GEMINI_MODEL", "gemini-2.5-flash")
 GROQ_MODEL = os.getenv("MEMORYFEED_GROQ_MODEL", "qwen/qwen3-32b")
+_CFG = load_runtime_config()
+_GEMINI_CB = CircuitBreaker(
+    name="gemini",
+    failure_threshold=_CFG.provider_circuit_breaker_failures,
+    cooldown_seconds=float(_CFG.provider_circuit_breaker_cooldown_seconds),
+)
+_GROQ_CB = CircuitBreaker(
+    name="groq",
+    failure_threshold=_CFG.provider_circuit_breaker_failures,
+    cooldown_seconds=float(_CFG.provider_circuit_breaker_cooldown_seconds),
+)
 
 
 @dataclass
@@ -49,6 +62,8 @@ def groq_state() -> ProviderState:
 def caption_image_with_gemini(image_bytes: bytes, prompt: str) -> str:
     if not provider_enabled("gemini"):
         return ""
+    if not _GEMINI_CB.allow():
+        return ""
     key = gemini_api_key()
     if not key:
         return ""
@@ -66,9 +81,16 @@ def caption_image_with_gemini(image_bytes: bytes, prompt: str) -> str:
         )
         text = getattr(response, "text", None)
         if isinstance(text, str) and text.strip():
+            _GEMINI_CB.on_success()
             return text.strip()
-        return _extract_gemini_text(response)
+        extracted = _extract_gemini_text(response)
+        if extracted:
+            _GEMINI_CB.on_success()
+        else:
+            _GEMINI_CB.on_failure()
+        return extracted
     except Exception:
+        _GEMINI_CB.on_failure()
         return ""
 
 
@@ -77,6 +99,8 @@ def rewrite_or_summarize_with_groq(user_text: str) -> str:
         return ""
     key = groq_api_key()
     if not key or not user_text.strip():
+        return ""
+    if not _GROQ_CB.allow():
         return ""
     try:
         from groq import Groq
@@ -101,8 +125,13 @@ def rewrite_or_summarize_with_groq(user_text: str) -> str:
             temperature=0.1,
         )
         content = completion.choices[0].message.content
-        return str(content).strip() if content else ""
+        if content:
+            _GROQ_CB.on_success()
+            return str(content).strip()
+        _GROQ_CB.on_failure()
+        return ""
     except Exception:
+        _GROQ_CB.on_failure()
         return ""
 
 
@@ -147,6 +176,15 @@ def providers_snapshot() -> dict[str, Any]:
     return {
         "gemini": {"enabled": gs.enabled, "reason": gs.reason, "model": gs.model},
         "groq": {"enabled": qs.enabled, "reason": qs.reason, "model": qs.model},
+    }
+
+
+def provider_runtime_state() -> dict[str, Any]:
+    g = _GEMINI_CB.state()
+    q = _GROQ_CB.state()
+    return {
+        "gemini": {"status": g.status, "failure_count": g.failure_count, "cooldown_seconds": g.cooldown_seconds},
+        "groq": {"status": q.status, "failure_count": q.failure_count, "cooldown_seconds": q.cooldown_seconds},
     }
 
 

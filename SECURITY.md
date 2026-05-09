@@ -55,6 +55,10 @@ MemoryFeed is local-first: captured memories are stored on the local machine by 
   - explicit admin endpoints
   - reset requires `confirm=RESET`
 - Rotating logs and request-level audit entries
+- In-memory API rate limiter on `/api/*` endpoints (configurable window + quota)
+- Queue resilience with retry + exponential backoff + dead-letter counters (vision/indexer)
+- Provider circuit breakers for Gemini/Groq to prevent cascading external failures
+- Readiness probe `/readyz` exposing queue health and provider breaker state
 
 ## Redaction Scope
 

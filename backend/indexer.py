@@ -14,6 +14,7 @@ from sentence_transformers import SentenceTransformer
 from backend.embeddings import build_semantic_text
 from backend.logging import log_event
 from backend.redaction import scan_sensitive_content
+from backend.resilience import backoff_seconds
 from backend.runtime_config import load_runtime_config
 from backend.store import LANCEDB_DIR, Store
 
@@ -45,6 +46,9 @@ class IndexerService:
         self._query_cache_hits = 0
         self._query_cache_misses = 0
         self._query_cache_evictions = 0
+        self._retried = 0
+        self._dead_letter = 0
+        self._attempts: dict[str, int] = {}
 
         self.db = lancedb.connect(str(LANCEDB_DIR))
         self.table = self._ensure_table()
@@ -92,16 +96,36 @@ class IndexerService:
             logger.warning("Indexer queue full. Dropping item_id=%s", item_id)
 
     async def _worker(self) -> None:
+        cfg = load_runtime_config()
         while self._running:
             item_id = await self.queue.get()
             try:
                 await self.index_item(item_id)
                 self._processed += 1
+                self._attempts.pop(item_id, None)
             except Exception as exc:
                 self._failed += 1
-                logger.exception("Failed to index item %s: %s", item_id, exc)
+                attempt = int(self._attempts.get(item_id, 0)) + 1
+                self._attempts[item_id] = attempt
+                if attempt < cfg.queue_retry_max_attempts:
+                    self._retried += 1
+                    delay = backoff_seconds(
+                        attempt=attempt,
+                        base=cfg.queue_retry_base_delay_seconds,
+                        cap=cfg.queue_retry_max_delay_seconds,
+                    )
+                    logger.warning("index_retry item_id=%s attempt=%s delay_s=%.3f error=%s", item_id, attempt, delay, exc)
+                    asyncio.create_task(self._requeue_after(item_id, delay))
+                else:
+                    self._dead_letter += 1
+                    self._attempts.pop(item_id, None)
+                    logger.exception("index_dead_letter item_id=%s attempts=%s error=%s", item_id, attempt, exc)
             finally:
                 self.queue.task_done()
+
+    async def _requeue_after(self, item_id: str, delay_seconds: float) -> None:
+        await asyncio.sleep(max(0.0, delay_seconds))
+        await self.enqueue(item_id)
 
     async def index_item(self, item_id: str) -> None:
         item = await asyncio.to_thread(self.store.get_item, item_id)
@@ -206,6 +230,8 @@ class IndexerService:
             "query_cache_misses": self._query_cache_misses,
             "query_cache_evictions": self._query_cache_evictions,
             "query_cache_size": len(self._query_vec_cache),
+            "retried": self._retried,
+            "dead_letter": self._dead_letter,
         }
 
     async def _get_query_vector(self, query: str) -> list[float]:

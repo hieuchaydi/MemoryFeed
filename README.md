@@ -66,6 +66,7 @@ MEMORYFEED_AI_PROVIDER=none
 - Production blueprint: `docs/MEMORY_INFRASTRUCTURE_BLUEPRINT.md`
 - Docker runbook: `docs/DOCKER_README.md`
 - Research eval suite: `docs/RESEARCH_EVALUATION_SUITE.md`
+- Production roadmap v1.1.0: `docs/ROADMAP_V1_1_0_PRODUCTION.md`
 
 ## Requirements
 
@@ -231,6 +232,7 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `GET /api/native/status`
 - `GET /api/queues/status`
 - `GET /api/perf`
+- `GET /readyz`
 - `GET /api/debug/item/{id}`
 - `GET /api/memory/lifecycle/timeline`
 - `POST /api/memory/lifecycle/decay`
@@ -315,6 +317,14 @@ Search/reliability controls:
 - `MEMORY_DECAY_HALF_LIFE_DAYS=90`
 - `MEMORY_BACKGROUND_MAINTENANCE=true`
 - `MEMORY_MAINTENANCE_INTERVAL_SECONDS=600`
+- `MEMORY_QUEUE_RETRY_MAX_ATTEMPTS=4`
+- `MEMORY_QUEUE_RETRY_BASE_DELAY_SECONDS=0.8`
+- `MEMORY_QUEUE_RETRY_MAX_DELAY_SECONDS=20`
+- `MEMORY_PROVIDER_CB_FAILURES=5`
+- `MEMORY_PROVIDER_CB_COOLDOWN_SECONDS=30`
+- `MEMORY_API_RATE_LIMIT_ENABLED=true`
+- `MEMORY_API_RATE_LIMIT_REQUESTS=120`
+- `MEMORY_API_RATE_LIMIT_WINDOW_SECONDS=60`
 
 Logging:
 - `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`

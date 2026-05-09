@@ -306,6 +306,9 @@ Diagram suggestions:
 
 - Deterministic migrations and rollback tested.
 - Replayable event log with idempotent workers.
+- Queue retry/backoff + dead-letter observability enabled for asynchronous workers.
+- External provider circuit breakers enabled for caption/summarization calls.
+- API rate limiting and readiness probe (`/readyz`) enabled.
 - SLO dashboards for ingest/retrieval/background lag.
 - Benchmark gate integrated in CI.
 - Threat model reviewed and signed off.
