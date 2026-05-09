@@ -15,9 +15,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.capture import normalize_capture
+from backend.crypto_at_rest import AtRestCrypto
 from backend.debug import explain_archival_decision, explain_confidence_reduction, explain_duplicate_decision
 from backend.import_export import export_payload, import_payload
 from backend.indexer import IndexerService
@@ -79,8 +81,9 @@ lifecycle = MemoryLifecycleEngine(store.db_path)
 capture_metrics = collections.defaultdict(lambda: {"attempts": 0, "stored": 0, "duplicates": 0, "missing": 0})
 rate_limit_windows: dict[str, collections.deque[float]] = collections.defaultdict(collections.deque)
 rate_limit_lock = asyncio.Lock()
+crypto = AtRestCrypto()
 
-if IMAGE_CACHE_DIR.exists():
+if IMAGE_CACHE_DIR.exists() and not crypto.enabled:
     app.mount("/images", StaticFiles(directory=str(IMAGE_CACHE_DIR)), name="images")
 
 
@@ -244,6 +247,17 @@ async def _warm_related_memories(item_id: str) -> None:
         logger.exception("interest warm failed item_id=%s", item_id)
 
 
+def _guess_media_type(name: str) -> str:
+    lowered = name.lower()
+    if lowered.endswith(".png.menc") or lowered.endswith(".png"):
+        return "image/png"
+    if lowered.endswith(".webp.menc") or lowered.endswith(".webp"):
+        return "image/webp"
+    if lowered.endswith(".gif.menc") or lowered.endswith(".gif"):
+        return "image/gif"
+    return "image/jpeg"
+
+
 @app.get("/api/search")
 async def search_api(
     q: str = Query(default="", min_length=0),
@@ -401,6 +415,10 @@ async def stats_api() -> dict[str, Any]:
         "indexer": indexer.status(),
         "vision": vision.status(),
     }
+    payload["at_rest_encryption"] = {
+        "enabled": crypto.state.enabled,
+        "provider": crypto.state.provider,
+    }
     cfg = load_runtime_config()
     guard = verify_local_only_mode(cfg)
     payload["privacy_guard"] = {
@@ -551,6 +569,23 @@ async def reset_data_api(
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/images/{name}")
+async def encrypted_image_proxy(name: str) -> Response:
+    if "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="invalid image name")
+    enc_path = (store.db_path.parent / "images_enc" / name).resolve()
+    if not enc_path.exists() or not enc_path.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+    if not crypto.enabled:
+        return FileResponse(enc_path)
+    try:
+        payload = enc_path.read_bytes()
+        data = crypto.decrypt_bytes(payload, aad=b"memoryfeed:image")
+    except Exception:
+        raise HTTPException(status_code=500, detail="cannot decrypt image")
+    return StreamingResponse(iter([data]), media_type=_guess_media_type(name))
 
 
 @app.get("/readyz")

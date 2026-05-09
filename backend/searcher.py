@@ -13,7 +13,7 @@ from backend.retrieval_intelligence import score_with_trace
 from backend.runtime_config import load_runtime_config
 from backend.indexer import IndexerService
 from backend.native_accel import rrf_topk_fast
-from backend.store import IMAGE_CACHE_DIR, Store
+from backend.store import IMAGE_CACHE_DIR, IMAGE_ENCRYPTED_DIR, Store
 
 
 class Searcher:
@@ -223,12 +223,14 @@ def _parse_iso(value: str | None) -> datetime | None:
 def _normalize_thumbnail(value: str | None) -> str | None:
     if not value:
         return None
-    if value.startswith(("http://", "https://", "/images/")):
+    if value.startswith(("http://", "https://", "/images/", "/api/images/")):
         return value
     p = Path(value)
     try:
         if p.exists() and p.parent.resolve() == IMAGE_CACHE_DIR.resolve():
             return f"/images/{p.name}"
+        if p.exists() and p.parent.resolve() == IMAGE_ENCRYPTED_DIR.resolve():
+            return f"/api/images/{p.name}"
     except Exception:
         return None
     return None

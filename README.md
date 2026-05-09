@@ -233,6 +233,7 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `GET /api/queues/status`
 - `GET /api/perf`
 - `GET /readyz`
+- `GET /api/images/{name}` (encrypted image proxy when at-rest encryption is enabled)
 - `GET /api/debug/item/{id}`
 - `GET /api/memory/lifecycle/timeline`
 - `POST /api/memory/lifecycle/decay`
@@ -325,6 +326,9 @@ Search/reliability controls:
 - `MEMORY_API_RATE_LIMIT_ENABLED=true`
 - `MEMORY_API_RATE_LIMIT_REQUESTS=120`
 - `MEMORY_API_RATE_LIMIT_WINDOW_SECONDS=60`
+- `MEMORY_ENCRYPTION_ENABLED=1|0`
+- `MEMORY_ENCRYPTION_KEY=<base64url-32-byte-key>` (optional override)
+- `MEMORY_ENCRYPTION_KEY_FILE=~/.memoryfeed/keys/master.key`
 
 Logging:
 - `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`

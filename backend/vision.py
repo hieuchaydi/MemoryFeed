@@ -9,11 +9,12 @@ from typing import Any
 
 import httpx
 
+from backend.crypto_at_rest import AtRestCrypto
 from backend.indexer import IndexerService
 from backend.llm_clients import caption_image_with_gemini, rewrite_or_summarize_with_groq
 from backend.resilience import backoff_seconds
 from backend.runtime_config import load_runtime_config
-from backend.store import IMAGE_CACHE_DIR, Store
+from backend.store import IMAGE_CACHE_DIR, IMAGE_ENCRYPTED_DIR, Store
 
 logger = logging.getLogger(__name__)
 VISION_PROMPT = (
@@ -36,6 +37,7 @@ class VisionService:
         self._retried = 0
         self._dead_letter = 0
         self._attempts: dict[str, int] = {}
+        self._crypto = AtRestCrypto()
 
     async def start(self) -> None:
         if self._running:
@@ -121,14 +123,18 @@ class VisionService:
     async def _cache_image(self, client: httpx.AsyncClient, image_url: str) -> Path | None:
         digest = hashlib.sha256(image_url.encode("utf-8", errors="ignore")).hexdigest()[:24]
         suffix = _guess_suffix(image_url)
-        target = IMAGE_CACHE_DIR / f"{digest}{suffix}"
+        target = IMAGE_ENCRYPTED_DIR / f"{digest}{suffix}.menc" if self._crypto.enabled else (IMAGE_CACHE_DIR / f"{digest}{suffix}")
         if target.exists() and target.stat().st_size > 0:
             return target
 
         try:
             resp = await client.get(image_url, follow_redirects=True)
             resp.raise_for_status()
-            target.write_bytes(resp.content)
+            if self._crypto.enabled:
+                payload = self._crypto.encrypt_bytes(resp.content, aad=b"memoryfeed:image")
+                target.write_bytes(payload)
+            else:
+                target.write_bytes(resp.content)
             return target
         except Exception as exc:
             logger.debug("Failed to download image %s: %s", image_url, exc)
@@ -136,7 +142,8 @@ class VisionService:
 
     async def _caption_image(self, image_path: Path) -> str:
         try:
-            image_bytes = image_path.read_bytes()
+            raw = image_path.read_bytes()
+            image_bytes = self._crypto.decrypt_bytes(raw, aad=b"memoryfeed:image")
         except Exception as exc:
             logger.debug("Cannot read cached image %s: %s", image_path, exc)
             return ""

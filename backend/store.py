@@ -24,6 +24,7 @@ DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"
 DB_PATH = DATA_DIR / "memoryfeed.db"
 LANCEDB_DIR = DATA_DIR / "lancedb"
 IMAGE_CACHE_DIR = DATA_DIR / "images"
+IMAGE_ENCRYPTED_DIR = DATA_DIR / "images_enc"
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +34,7 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         LANCEDB_DIR.mkdir(parents=True, exist_ok=True)
         IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        IMAGE_ENCRYPTED_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._init_db()
 
@@ -1137,12 +1139,14 @@ def _mode_bonus(item: dict[str, Any], mode: str) -> float:
 def _normalize_thumbnail(value: str | None) -> str | None:
     if not value:
         return None
-    if value.startswith(("http://", "https://", "/images/")):
+    if value.startswith(("http://", "https://", "/images/", "/api/images/")):
         return value
     p = Path(value)
     try:
         if p.exists() and p.parent.resolve() == IMAGE_CACHE_DIR.resolve():
             return f"/images/{p.name}"
+        if p.exists() and p.parent.resolve() == IMAGE_ENCRYPTED_DIR.resolve():
+            return f"/api/images/{p.name}"
     except Exception:
         return None
     return None

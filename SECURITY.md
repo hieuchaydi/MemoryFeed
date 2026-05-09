@@ -33,6 +33,7 @@ MemoryFeed is local-first: captured memories are stored on the local machine by 
 ## Current Mitigations
 
 - Local-first default storage in local SQLite + LanceDB
+- Optional at-rest image encryption (ChaCha20-Poly1305 envelope; key from env/key file/keyring fallback)
 - Offline-only mode: `OFFLINE_ONLY=1` and `MEMORYFEED_AI_PROVIDER=none`
 - Provider opt-in controls: `MEMORYFEED_AI_PROVIDER=none|gemini|groq|auto`
 - Public bind guardrails:
