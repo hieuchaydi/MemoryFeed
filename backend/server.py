@@ -332,6 +332,16 @@ async def debug_item_api(item_id: str) -> dict[str, Any]:
     }
 
 
+@app.get("/api/debug/capture/latest")
+async def latest_capture_debug_api() -> dict[str, Any]:
+    rows = await asyncio.to_thread(store.list_items, 1, 0, None, False)
+    if not rows:
+        return {"ok": False, "item": None}
+    item = dict(rows[0])
+    item["selector_used"] = (item.get("capture_debug") or {}).get("selector_used", {})
+    return {"ok": True, "item": item}
+
+
 @app.get("/api/items")
 async def list_items_api(
     limit: int = Query(default=50, ge=1, le=500),

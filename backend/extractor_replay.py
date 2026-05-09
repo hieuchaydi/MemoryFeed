@@ -81,10 +81,11 @@ _CLASS_RE = re.compile(r"\.([A-Za-z0-9_-]+)")
 
 def _parse_selector_token(token: str) -> dict[str, Any]:
     s = token.strip()
-    tag_match = re.match(r"^[A-Za-z0-9_-]+", s)
+    sanitized = _ATTR_RE.sub("", s)
+    tag_match = re.match(r"^[A-Za-z0-9_-]+", sanitized)
     tag = tag_match.group(0).lower() if tag_match else ""
-    ids = [m.group(1) for m in _ID_RE.finditer(s)]
-    classes = [m.group(1) for m in _CLASS_RE.finditer(s)]
+    ids = [m.group(1) for m in _ID_RE.finditer(sanitized)]
+    classes = [m.group(1) for m in _CLASS_RE.finditer(sanitized)]
 
     attrs: list[tuple[str, str, str]] = []
     for raw in _ATTR_RE.findall(s):
@@ -239,7 +240,22 @@ def _collect_urls(
     seen: set[str] = set()
     output: list[str] = []
     used: list[str] = []
-    for selector in [*selectors, *fallback]:
+    for selector in selectors:
+        nodes = _find_nodes(dom, selector)
+        for node in nodes:
+            url = _normalize_abs_url(_read_node_url(node, selector), base_url)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            output.append(url)
+            used.append(selector)
+            if len(output) >= limit:
+                return output, list(dict.fromkeys(used))
+
+    if output:
+        return output, list(dict.fromkeys(used))
+
+    for selector in fallback:
         nodes = _find_nodes(dom, selector)
         for node in nodes:
             url = _normalize_abs_url(_read_node_url(node, selector), base_url)
@@ -287,6 +303,14 @@ def replay_fixture(
         fallback.get("media") or [],
         base_url=base_url,
     )
+    if not handle and html_path.parent.name != "twitter":
+        canonical_for_handle = canonical_url or base_url
+        parsed = urlparse(canonical_for_handle)
+        parts = [p for p in parsed.path.split("/") if p]
+        if platform == "twitter" and len(parts) >= 1:
+            handle = f"@{parts[0]}" if not parts[0].startswith("@") else parts[0]
+    if platform != "twitter" and str(handle or "").lower() in {"post", "posts", "status", "watch"}:
+        handle = ""
     if deterministic:
         media_urls = sorted(media_urls)
         media_selectors = sorted(dict.fromkeys(media_selectors))

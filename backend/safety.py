@@ -76,3 +76,23 @@ def _looks_like_base64(token: str) -> bool:
     except Exception:
         return False
     return True
+
+
+def detect_prompt_injection(text: str) -> dict[str, object]:
+    data = str(text or "")
+    signals: list[str] = []
+    if re.search(r"\bignore\s+(all|previous)\s+instructions\b", data, re.IGNORECASE):
+        signals.append("ignore_previous_instructions")
+    if re.search(r"\breveal\s+(secrets?|credentials?)\b", data, re.IGNORECASE):
+        signals.append("reveal_secrets")
+    if re.search(r"\bsystem\s+prompt\b", data, re.IGNORECASE):
+        signals.append("system_prompt_manipulation")
+    score, _ = assess_prompt_risk(data)
+    return {"suspicious": bool(signals) or score >= 0.4, "signals": signals}
+
+
+def sanitize_untrusted_text(text: str) -> str:
+    out = str(text or "")
+    out = re.sub(r"\bignore\s+(all|previous)\s+instructions\b", "[SANITIZED_INSTRUCTION]", out, flags=re.IGNORECASE)
+    out = re.sub(r"\breveal\s+(secrets?|credentials?)\b", "[SANITIZED_SECRET_REQUEST]", out, flags=re.IGNORECASE)
+    return out

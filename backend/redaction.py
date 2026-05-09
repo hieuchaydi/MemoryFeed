@@ -31,3 +31,17 @@ def redact_value(value: Any) -> Any:
 
 def classify_sensitivity(text: str, url: str = "") -> tuple[str, list[str]]:
     return detect_sensitivity(text=text, url=url)
+
+
+def scan_sensitive_content(text: str) -> dict[str, object]:
+    value = str(text or "")
+    reasons: list[str] = []
+    if _EMAIL_RE.search(value):
+        reasons.append("email")
+    if _PHONE_RE.search(value):
+        reasons.append("phone")
+    if _BEARER_RE.search(value):
+        reasons.append("bearer_token")
+    if _API_KEY_RE.search(value):
+        reasons.append("api_key")
+    return {"sensitive": bool(reasons), "reasons": reasons}

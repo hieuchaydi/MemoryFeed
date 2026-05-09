@@ -108,7 +108,8 @@ class IndexerService:
         if not item:
             return
         if bool(item.get("embedding_skipped")):
-            await asyncio.to_thread(self.store.mark_embedding_done, item_id)
+            reason = str(item.get("embedding_skipped_reason") or "sensitive:preclassified")
+            await asyncio.to_thread(self.store.mark_embedding_skipped, item_id, reason)
             return
 
         combined = build_semantic_text(item)

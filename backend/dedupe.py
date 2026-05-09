@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
+from backend.runtime_config import load_runtime_config
 
 _WORD_RE = re.compile(r"[a-z0-9]{3,}")
 
@@ -47,3 +50,22 @@ def diversity_rerank(
         seen_platforms[platform] = platform_count + 1
     out.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
     return out
+
+
+def dedupe_bucket(captured_at_iso: str, platform: str = "unknown") -> str:
+    cfg = load_runtime_config()
+    window_hours = int(cfg.memory_platform_dedupe_windows.get((platform or "").lower(), cfg.memory_dedupe_window_hours))
+    window_hours = max(1, window_hours)
+    try:
+        dt = datetime.fromisoformat(str(captured_at_iso).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        dt = datetime.now(timezone.utc)
+    return str(int(dt.timestamp() // (window_hours * 3600)))
+
+
+def semantic_similarity(text_a: str, text_b: str) -> float:
+    a = " ".join(str(text_a or "").lower().split())
+    b = " ".join(str(text_b or "").lower().split())
+    if not a or not b:
+        return 0.0
+    return float(SequenceMatcher(None, a, b).ratio())

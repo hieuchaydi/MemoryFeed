@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+import json
 
 VALID_AI_PROVIDERS = {"none", "gemini", "groq", "auto"}
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -25,6 +26,15 @@ class RuntimeConfig:
     skip_sensitive_embedding: bool
     background_maintenance: bool
     maintenance_interval_seconds: int
+    memory_dedupe_window_hours: int
+    memory_platform_dedupe_windows: dict[str, int]
+    memory_semantic_dedupe: bool
+    memory_dedupe_similarity_threshold: float
+    memory_sanitize_prompt_content: bool
+    memory_skip_sensitive_embedding: bool
+    memory_retention_days: int
+    memory_auto_archive: bool
+    memory_archive_low_score_threshold: float
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -60,6 +70,27 @@ def env_float(name: str, default: float, min_value: float = 0.0, max_value: floa
     return parsed
 
 
+def env_json_dict_int(name: str) -> dict[str, int]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            return {}
+        out: dict[str, int] = {}
+        for key, value in payload.items():
+            try:
+                hours = int(value)
+            except Exception:
+                continue
+            if hours > 0:
+                out[str(key).lower()] = hours
+        return out
+    except Exception:
+        return {}
+
+
 def load_runtime_config() -> RuntimeConfig:
     offline_only = env_flag("OFFLINE_ONLY", default=False)
     ai_provider = (os.getenv("MEMORYFEED_AI_PROVIDER", "auto").strip().lower() or "auto")
@@ -85,6 +116,15 @@ def load_runtime_config() -> RuntimeConfig:
         skip_sensitive_embedding=env_flag("MEMORY_SKIP_SENSITIVE_EMBEDDING", default=True),
         background_maintenance=env_flag("MEMORY_BACKGROUND_MAINTENANCE", default=True),
         maintenance_interval_seconds=env_int("MEMORY_MAINTENANCE_INTERVAL_SECONDS", default=600, min_value=60, max_value=86400),
+        memory_dedupe_window_hours=env_int("MEMORY_DEDUPE_WINDOW_HOURS", default=2, min_value=1, max_value=168),
+        memory_platform_dedupe_windows=env_json_dict_int("MEMORY_PLATFORM_DEDUPE_WINDOWS"),
+        memory_semantic_dedupe=env_flag("MEMORY_SEMANTIC_DEDUPE", default=False),
+        memory_dedupe_similarity_threshold=env_float("MEMORY_DEDUPE_SIMILARITY_THRESHOLD", default=0.82, min_value=0.5, max_value=1.0),
+        memory_sanitize_prompt_content=env_flag("MEMORY_SANITIZE_PROMPT_CONTENT", default=True),
+        memory_skip_sensitive_embedding=env_flag("MEMORY_SKIP_SENSITIVE_EMBEDDING", default=True),
+        memory_retention_days=env_int("MEMORY_RETENTION_DAYS", default=90, min_value=7, max_value=3650),
+        memory_auto_archive=env_flag("MEMORY_AUTO_ARCHIVE", default=False),
+        memory_archive_low_score_threshold=env_float("MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD", default=0.25, min_value=0.0, max_value=5.0),
     )
 
 

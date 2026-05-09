@@ -16,6 +16,7 @@ from backend.noise import classify_noise
 from backend.retention import compute_decay
 from backend.runtime_config import load_runtime_config
 from backend.safety import assess_prompt_risk, classify_sensitivity
+from backend.dedupe import semantic_similarity
 
 DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"))).expanduser()
 DB_PATH = DATA_DIR / "memoryfeed.db"
@@ -145,9 +146,22 @@ class Store:
                 self._ensure_column(conn, "items", "sensitivity_level", "TEXT DEFAULT 'none'")
                 self._ensure_column(conn, "items", "sensitivity_reasons", "TEXT")
                 self._ensure_column(conn, "items", "embedding_skipped", "INTEGER DEFAULT 0")
+                self._ensure_column(conn, "items", "embedding_skipped_reason", "TEXT")
                 self._ensure_column(conn, "items", "search_hidden", "INTEGER DEFAULT 0")
                 self._ensure_column(conn, "items", "index_dirty", "INTEGER DEFAULT 1")
                 self._ensure_column(conn, "items", "updated_at", "TEXT")
+                self._ensure_column(conn, "items", "confidence_reasons", "TEXT")
+                self._ensure_column(conn, "items", "capture_method", "TEXT")
+                self._ensure_column(conn, "items", "extractor_version", "TEXT")
+                self._ensure_column(conn, "items", "capture_source", "TEXT")
+                self._ensure_column(conn, "items", "replay_source", "TEXT")
+                self._ensure_column(conn, "items", "suspicious_prompt_content", "INTEGER DEFAULT 0")
+                self._ensure_column(conn, "items", "safety_signals", "TEXT")
+                self._ensure_column(conn, "items", "archive_reason", "TEXT")
+                self._ensure_column(conn, "items", "importance_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "resurfacing_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "recency_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "recurrence_score", "REAL DEFAULT 0.0")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_heat ON items(heat);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_archived_at ON items(archived_at);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_canonical_url ON items(canonical_url);")
@@ -180,6 +194,11 @@ class Store:
                 conn.close()
 
     def insert_item(self, item: dict[str, Any]) -> tuple[bool, str | None]:
+        cfg = load_runtime_config()
+        if cfg.memory_semantic_dedupe:
+            duplicate_id = self._find_semantic_duplicate(item)
+            if duplicate_id:
+                return False, duplicate_id
         return self.insert_item_atomic(item, fail_after_write=False)
 
     def insert_item_atomic(self, item: dict[str, Any], fail_after_write: bool = False) -> tuple[bool, str | None]:
@@ -277,6 +296,11 @@ class Store:
         out.setdefault("source_context", None)
         out.setdefault("quality_flags", [])
         out.setdefault("capture_debug", {})
+        out.setdefault("confidence_reasons", [])
+        out.setdefault("capture_method", "mutation_observer")
+        out.setdefault("extractor_version", f"{out.get('platform') or 'unknown'}_v3_1")
+        out.setdefault("capture_source", "timeline_scroll")
+        out.setdefault("replay_source", None)
         out.setdefault("capture_confidence", _capture_confidence(out))
         out.setdefault("dwell_seconds", 0.0)
         out.setdefault("embedding_done", 0)
@@ -322,6 +346,11 @@ class Store:
         )
         out.setdefault("prompt_risk_score", prompt_risk_score)
         out.setdefault("prompt_risk_reason", prompt_risk_reason)
+        out.setdefault("suspicious_prompt_content", bool(prompt_risk_score >= 0.4))
+        safety_signals = []
+        if prompt_risk_reason:
+            safety_signals.append(prompt_risk_reason)
+        out.setdefault("safety_signals", safety_signals)
 
         sensitivity_level, sensitivity_reasons = classify_sensitivity(
             str(out.get("text_content") or ""),
@@ -331,12 +360,35 @@ class Store:
         out.setdefault("sensitivity_reasons", sensitivity_reasons)
         skip_embedding = cfg.skip_sensitive_embedding and sensitivity_level == "high"
         out.setdefault("embedding_skipped", 1 if skip_embedding else 0)
+        out.setdefault("embedding_skipped_reason", f"sensitive:{','.join(sensitivity_reasons)}" if skip_embedding else None)
         out.setdefault("search_hidden", 1 if (cfg.hide_sensitive_from_search and sensitivity_level == "high") else 0)
         out.setdefault("index_dirty", 0 if skip_embedding else 1)
 
         decay_score, aging_state = compute_decay(out, half_life_days=cfg.decay_half_life_days)
         out.setdefault("decay_score", decay_score)
         out.setdefault("aging_state", aging_state)
+        importance_score, resurfacing_score, recency_score, recurrence_score = _compute_ranking_primitives(out)
+        out.setdefault("importance_score", importance_score)
+        out.setdefault("resurfacing_score", resurfacing_score)
+        out.setdefault("recency_score", recency_score)
+        out.setdefault("recurrence_score", recurrence_score)
+        if cfg.memory_auto_archive:
+            _maybe_apply_auto_archive(out, cfg.memory_retention_days, cfg.memory_archive_low_score_threshold)
+        # Backward-compatible storage for fields not present in older schemas.
+        capture_debug = out.setdefault("capture_debug", {})
+        capture_debug.setdefault("_confidence_reasons", list(out.get("confidence_reasons") or []))
+        capture_debug.setdefault("_capture_method", str(out.get("capture_method") or "mutation_observer"))
+        capture_debug.setdefault("_extractor_version", str(out.get("extractor_version") or "unknown_v3_1"))
+        capture_debug.setdefault("_capture_source", str(out.get("capture_source") or "timeline_scroll"))
+        capture_debug.setdefault("_replay_source", out.get("replay_source"))
+        capture_debug.setdefault("_safety_signals", list(out.get("safety_signals") or []))
+        capture_debug.setdefault("_suspicious_prompt_content", bool(out.get("suspicious_prompt_content")))
+        capture_debug.setdefault("_embedding_skipped_reason", out.get("embedding_skipped_reason"))
+        capture_debug.setdefault("_importance_score", float(out.get("importance_score") or 0.0))
+        capture_debug.setdefault("_resurfacing_score", float(out.get("resurfacing_score") or 0.0))
+        capture_debug.setdefault("_recency_score", float(out.get("recency_score") or 0.0))
+        capture_debug.setdefault("_recurrence_score", float(out.get("recurrence_score") or 0.0))
+        capture_debug.setdefault("_archive_reason", out.get("archive_reason"))
         return out
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
@@ -369,6 +421,21 @@ class Store:
             conn.execute(
                 "UPDATE items SET embedding_done = 1, index_dirty = 0, updated_at = ? WHERE id = ?",
                 (now_iso(), item_id),
+            )
+
+    def mark_embedding_skipped(self, item_id: str, reason: str) -> None:
+        with self._write_transaction() as conn:
+            conn.execute(
+                """
+                UPDATE items
+                SET embedding_done = 1,
+                    embedding_skipped = 1,
+                    embedding_skipped_reason = ?,
+                    index_dirty = 0,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (reason[:500], now_iso(), item_id),
             )
 
     def update_item_metadata(
@@ -482,6 +549,19 @@ class Store:
         with self._write_transaction() as conn:
             cur = conn.execute(
                 f"UPDATE items SET archived_at = ?, updated_at = ? WHERE id IN ({placeholders})",
+                params,
+            )
+            return int(cur.rowcount or 0)
+
+    def unarchive_items(self, item_ids: list[str]) -> int:
+        ids = [item_id for item_id in item_ids if item_id]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [now_iso(), *ids]
+        with self._write_transaction() as conn:
+            cur = conn.execute(
+                f"UPDATE items SET archived_at = NULL, archive_reason = NULL, updated_at = ? WHERE id IN ({placeholders})",
                 params,
             )
             return int(cur.rowcount or 0)
@@ -621,6 +701,20 @@ class Store:
         finally:
             conn.close()
 
+    def schema_version(self) -> int:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+            if row:
+                try:
+                    return int(str(row["value"]))
+                except Exception:
+                    return 0
+            # Backward compatibility fallback for legacy DBs without migration metadata.
+            return 5
+        finally:
+            conn.close()
+
     def all_items(self) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
@@ -727,6 +821,33 @@ class Store:
         with self._write_transaction() as conn:
             conn.execute(f"UPDATE items SET {updates} WHERE id = ?", params)
 
+    def _find_semantic_duplicate(self, item: dict[str, Any]) -> str | None:
+        text = str(item.get("text_content") or "").strip()
+        if not text:
+            return None
+        cfg = load_runtime_config()
+        threshold = float(cfg.memory_dedupe_similarity_threshold)
+        platform = str(item.get("platform") or "unknown")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, text_content
+                FROM items
+                WHERE platform = ?
+                ORDER BY captured_at DESC
+                LIMIT 120
+                """,
+                (platform,),
+            ).fetchall()
+            for row in rows:
+                score = semantic_similarity(text, str(row["text_content"] or ""))
+                if score >= threshold:
+                    return str(row["id"])
+            return None
+        finally:
+            conn.close()
+
     def rebuild_all_fingerprints(self) -> int:
         rows = self.all_items()
         changed = 0
@@ -779,6 +900,17 @@ class Store:
     def _row_to_item(row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:
             return None
+        capture_debug = _safe_json_dict(row["capture_debug"]) if "capture_debug" in row.keys() else {}
+        importance_score, resurfacing_score, recency_score, recurrence_score = _compute_ranking_primitives(
+            {
+                "captured_at": row["captured_at"] if "captured_at" in row.keys() else None,
+                "capture_confidence": row["capture_confidence"] if "capture_confidence" in row.keys() else 1.0,
+                "starred": bool(row["starred"]) if "starred" in row.keys() else False,
+                "heat": float(row["heat"]) if "heat" in row.keys() and row["heat"] is not None else 1.0,
+                "surfaced_count": int(row["surfaced_count"] or 0) if "surfaced_count" in row.keys() else 0,
+                "decay_score": float(row["decay_score"]) if "decay_score" in row.keys() and row["decay_score"] is not None else 0.0,
+            }
+        )
         return {
             "id": row["id"],
             "url": row["url"],
@@ -802,7 +934,7 @@ class Store:
             "thumbnail_url": row["thumbnail_url"] if "thumbnail_url" in row.keys() else None,
             "source_context": row["source_context"] if "source_context" in row.keys() else None,
             "quality_flags": _safe_json_list(row["quality_flags"]) if "quality_flags" in row.keys() else [],
-            "capture_debug": _safe_json_dict(row["capture_debug"]) if "capture_debug" in row.keys() else {},
+            "capture_debug": capture_debug,
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
             "note": row["note"] if "note" in row.keys() else None,
             "tags": _safe_json_list(row["tags"]) if "tags" in row.keys() else [],
@@ -823,9 +955,33 @@ class Store:
             "sensitivity_level": row["sensitivity_level"] if "sensitivity_level" in row.keys() and row["sensitivity_level"] else "none",
             "sensitivity_reasons": _safe_json_list(row["sensitivity_reasons"]) if "sensitivity_reasons" in row.keys() else [],
             "embedding_skipped": bool(row["embedding_skipped"]) if "embedding_skipped" in row.keys() else False,
+            "embedding_skipped_reason": row["embedding_skipped_reason"] if "embedding_skipped_reason" in row.keys() else capture_debug.get("_embedding_skipped_reason"),
             "search_hidden": bool(row["search_hidden"]) if "search_hidden" in row.keys() else False,
             "index_dirty": bool(row["index_dirty"]) if "index_dirty" in row.keys() else False,
             "updated_at": row["updated_at"] if "updated_at" in row.keys() else None,
+            "confidence_reasons": _safe_json_list(row["confidence_reasons"]) if "confidence_reasons" in row.keys() and row["confidence_reasons"] else list(capture_debug.get("_confidence_reasons") or []),
+            "capture_method": row["capture_method"] if "capture_method" in row.keys() and row["capture_method"] else capture_debug.get("_capture_method"),
+            "extractor_version": row["extractor_version"] if "extractor_version" in row.keys() and row["extractor_version"] else capture_debug.get("_extractor_version"),
+            "capture_source": row["capture_source"] if "capture_source" in row.keys() and row["capture_source"] else capture_debug.get("_capture_source"),
+            "replay_source": row["replay_source"] if "replay_source" in row.keys() and row["replay_source"] else capture_debug.get("_replay_source"),
+            "suspicious_prompt_content": (
+                (bool(row["suspicious_prompt_content"]) if "suspicious_prompt_content" in row.keys() else False)
+                or bool(capture_debug.get("_suspicious_prompt_content"))
+            ),
+            "safety_signals": _safe_json_list(row["safety_signals"]) if "safety_signals" in row.keys() and row["safety_signals"] else list(capture_debug.get("_safety_signals") or []),
+            "importance_score": float(row["importance_score"]) if "importance_score" in row.keys() and row["importance_score"] is not None else importance_score,
+            "resurfacing_score": float(row["resurfacing_score"]) if "resurfacing_score" in row.keys() and row["resurfacing_score"] is not None else resurfacing_score,
+            "recency_score": float(row["recency_score"]) if "recency_score" in row.keys() and row["recency_score"] is not None else recency_score,
+            "recurrence_score": float(row["recurrence_score"]) if "recurrence_score" in row.keys() and row["recurrence_score"] is not None else recurrence_score,
+            "archive_reason": (
+                row["archive_reason"]
+                if "archive_reason" in row.keys() and row["archive_reason"]
+                else (
+                    capture_debug.get("_archive_reason")
+                    if (capture_debug.get("_archive_reason") and ("archived_at" in row.keys() and row["archived_at"]))
+                    else ("retention:auto_archive" if ("archived_at" in row.keys() and row["archived_at"]) else None)
+                )
+            ),
         }
 
     @staticmethod
@@ -957,3 +1113,31 @@ def _capture_confidence(item: dict[str, Any]) -> float:
     prompt_risk, _ = assess_prompt_risk(str(item.get("text_content") or ""))
     penalty = missing * 0.12 + prompt_risk * 0.25
     return round(max(0.05, min(1.0, 1.0 - penalty)), 6)
+
+
+def _compute_ranking_primitives(item: dict[str, Any]) -> tuple[float, float, float, float]:
+    now = datetime.now(timezone.utc)
+    captured = _parse_iso(str(item.get("captured_at") or "")) or now
+    age_days = max(0.0, (now - captured).total_seconds() / 86400.0)
+    recency = max(0.0, 1.0 - min(1.0, age_days / 365.0))
+    confidence = max(0.0, min(1.0, float(item.get("capture_confidence") or 1.0)))
+    starred_boost = 0.18 if item.get("starred") else 0.0
+    heat_component = min(0.35, float(item.get("heat") or 1.0) * 0.08)
+    decay_penalty = min(0.35, float(item.get("decay_score") or 0.0) * 0.25)
+    recurrence = max(0.0, min(1.0, float(item.get("surfaced_count") or 0) / 10.0))
+    importance = max(0.0, min(1.0, confidence * 0.62 + recency * 0.2 + heat_component + starred_boost - decay_penalty))
+    resurfacing = max(0.0, min(1.0, recency * 0.35 + recurrence * 0.45 + importance * 0.2))
+    return round(importance, 6), round(resurfacing, 6), round(recency, 6), round(recurrence, 6)
+
+
+def _maybe_apply_auto_archive(item: dict[str, Any], retention_days: int, low_score_threshold: float) -> None:
+    captured = _parse_iso(str(item.get("captured_at") or ""))
+    if not captured:
+        return
+    age_days = max(0.0, (datetime.now(timezone.utc) - captured).total_seconds() / 86400.0)
+    importance = float(item.get("importance_score") or 0.0)
+    if age_days >= max(1, int(retention_days)) and importance <= float(low_score_threshold):
+        if not item.get("archived_at"):
+            item["archived_at"] = now_iso()
+        if not item.get("archive_reason"):
+            item["archive_reason"] = f"retention:auto_archive:{retention_days}d"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from urllib.parse import urlparse
 
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_#@-]{2,}")
 _ENTITY_RE = re.compile(r"(@[A-Za-z0-9_]+|#[A-Za-z0-9_]+|\b[A-Z]{2,}\b)")
@@ -55,3 +56,16 @@ def derive_graph_fields(item: dict) -> dict[str, object]:
         "related_entities": entities,
         "semantic_group": semantic_group,
     }
+
+
+def infer_url_domain(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return "unknown"
+    try:
+        host = urlparse(raw).netloc.lower()
+    except Exception:
+        return "unknown"
+    if host.startswith("www."):
+        host = host[4:]
+    return host or "unknown"
