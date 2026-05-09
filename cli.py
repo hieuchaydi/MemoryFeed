@@ -30,6 +30,7 @@ from backend.import_export import export_payload, import_payload
 from backend.native_accel import status as native_status
 from backend.runtime_config import is_public_bind_host, load_runtime_config
 from backend.searcher import Searcher
+from backend.research_eval import run_evaluation_suite, write_markdown_summary, write_report
 from backend.store import DATA_DIR, Store
 from backend.verify import verify_store
 from memoryfeed.__version__ import __version__
@@ -488,6 +489,31 @@ def build_frontend() -> None:
     except subprocess.CalledProcessError as exc:
         console.print(f"[red]Frontend build failed:[/red] {exc}")
         sys.exit(exc.returncode)
+
+
+@cli.command("benchmark-suite")
+@click.option("--limit", default=10, show_default=True, type=int)
+@click.option("--iterations", default=1, show_default=True, type=int)
+@click.option("--out-dir", default=None, help="Output directory for JSON/Markdown reports")
+def benchmark_suite(limit: int, iterations: int, out_dir: str | None) -> None:
+    """Run research-grade evaluation suite and write report artifacts."""
+    target_dir = Path(out_dir) if out_dir else None
+    report = run_evaluation_suite(limit=limit, iterations=iterations)
+    json_path = write_report(report, out_dir=target_dir)
+    md_path = write_markdown_summary(report, out_dir=target_dir)
+    metrics = report.get("metrics") or {}
+    table = Table(title="Research Eval Summary")
+    table.add_column("Metric")
+    table.add_column("Value", style="cyan")
+    table.add_row("Latency p50 (ms)", str(metrics.get("latency_ms_p50", 0)))
+    table.add_row("Latency p95 (ms)", str(metrics.get("latency_ms_p95", 0)))
+    table.add_row("Retrieval Precision@5", str(metrics.get("retrieval_precision_at_5", 0)))
+    table.add_row("Memory Hit Quality", str(metrics.get("memory_hit_quality", 0)))
+    table.add_row("Token Reduction %", str(metrics.get("token_reduction_percent", 0)))
+    table.add_row("Pass Rate", str(metrics.get("pass_rate", 0)))
+    console.print(table)
+    console.print(f"[green]JSON report:[/green] {json_path}")
+    console.print(f"[green]Markdown summary:[/green] {md_path}")
 
 
 if __name__ == "__main__":

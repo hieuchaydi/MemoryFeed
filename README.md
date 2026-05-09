@@ -65,6 +65,7 @@ MEMORYFEED_AI_PROVIDER=none
 
 - Production blueprint: `docs/MEMORY_INFRASTRUCTURE_BLUEPRINT.md`
 - Docker runbook: `docs/DOCKER_README.md`
+- Research eval suite: `docs/RESEARCH_EVALUATION_SUITE.md`
 
 ## Requirements
 
@@ -264,6 +265,7 @@ memoryfeed feed --mode focus
 memoryfeed resurface "Docker networking CNI overlay Cilium"
 memoryfeed stats
 memoryfeed perf
+memoryfeed benchmark-suite --limit 10 --iterations 3
 memoryfeed items --starred
 memoryfeed export
 memoryfeed import --file ~/.memoryfeed/exports/memoryfeed-export-YYYY-MM-DD.json
