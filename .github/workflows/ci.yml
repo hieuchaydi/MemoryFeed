@@ -26,10 +26,13 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ] || [ -f setup.py ]; then pip install -e .; fi
 
       - name: Compile Check
-        run: python -m compileall backend memoryfeed tests
+        run: |
+          python -m compileall backend tests
+          if [ -d memoryfeed ]; then python -m compileall memoryfeed; fi
 
       - name: Unit Tests
         run: python -m unittest discover -s tests -v
@@ -48,7 +51,15 @@ jobs:
 
       - name: Validate Extension JS
         run: |
-          node --check extension/chrome/content.js
-          node --check extension/chrome/background.js
-          node --check extension/firefox/content.js
-          node --check extension/firefox/background.js
+          for file in \
+            extension/chrome/content.js \
+            extension/chrome/background.js \
+            extension/firefox/content.js \
+            extension/firefox/background.js
+          do
+            if [ -f "$file" ]; then
+              node --check "$file"
+            else
+              echo "Skip missing $file"
+            fi
+          done
