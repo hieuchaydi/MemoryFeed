@@ -1,0 +1,39 @@
+{
+  "platform": "twitter",
+  "candidate_selector": "article[data-testid=\"tweet\"]",
+  "text_selectors": [
+    "[data-testid=\"tweetText\"]",
+    "[lang]"
+  ],
+  "author_selectors": [
+    "div[data-testid=\"User-Name\"] span",
+    "a[role=\"link\"] span"
+  ],
+  "author_handle_selectors": [
+    "a[href^=\"/\"][role=\"link\"]"
+  ],
+  "canonical_url_selectors": [
+    "a[href*=\"/status/\"]"
+  ],
+  "media_selectors": [
+    "img[src*=\"pbs.twimg.com\"]",
+    "video source",
+    "video"
+  ],
+  "fallback_selectors": {
+    "text": [
+      "meta[name=\"description\"]",
+      "title"
+    ],
+    "author_name": [],
+    "author_handle": [],
+    "canonical_url": [
+      "link[rel=\"canonical\"]",
+      "meta[property=\"og:url\"]"
+    ],
+    "media": [
+      "meta[property=\"og:image\"]",
+      "img"
+    ]
+  }
+}

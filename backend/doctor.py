@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.llm_clients import gemini_state, groq_state
+from backend.migrate import latest_schema_version, run_migrations
 from backend.runtime_config import load_runtime_config, provider_requires_key
 from backend.store import DB_PATH, LANCEDB_DIR
 
@@ -85,6 +86,30 @@ def run_doctor() -> dict[str, Any]:
         )
     )
 
+    try:
+        migration_report = run_migrations(DB_PATH)
+        current = int(migration_report["after"])
+        latest = int(latest_schema_version())
+        checks.append(
+            _check(
+                "schema_version",
+                current >= latest,
+                f"Schema version {current} (latest={latest})",
+                "Run memoryfeed migrate",
+                severity="warning",
+            )
+        )
+    except Exception as exc:
+        checks.append(
+            _check(
+                "schema_version",
+                False,
+                f"Cannot validate schema version: {exc}",
+                "Run memoryfeed migrate",
+                severity="warning",
+            )
+        )
+
     has_error = any((not item["ok"]) and item["severity"] == "error" for item in checks)
     has_warning = any((not item["ok"]) and item["severity"] == "warning" for item in checks)
     status = "fail" if has_error else "warn" if has_warning else "ok"
@@ -101,6 +126,15 @@ def run_doctor() -> dict[str, Any]:
                 "allow_timeline": cfg.mcp_allow_timeline,
                 "allow_active_feed": cfg.mcp_allow_active_feed,
                 "redact_output": cfg.mcp_redact_output,
+            },
+            "memory_intelligence": {
+                "semantic_dedupe": cfg.memory_semantic_dedupe,
+                "dedupe_similarity_threshold": cfg.memory_dedupe_similarity_threshold,
+                "sanitize_prompt_content": cfg.memory_sanitize_prompt_content,
+                "skip_sensitive_embedding": cfg.memory_skip_sensitive_embedding,
+                "retention_days": cfg.memory_retention_days,
+                "auto_archive": cfg.memory_auto_archive,
+                "archive_low_score_threshold": cfg.memory_archive_low_score_threshold,
             },
         },
         "checks": checks,

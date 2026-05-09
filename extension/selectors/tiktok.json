@@ -1,0 +1,43 @@
+{
+  "platform": "tiktok",
+  "candidate_selector": "[data-e2e=\"recommend-list-item\"], [data-e2e=\"search_top-item\"], [data-e2e*=\"video-item\"], [data-e2e=\"feed-video\"], [data-e2e=\"search-card-item\"]",
+  "text_selectors": [
+    "[data-e2e=\"new-desc-span\"]",
+    "[data-e2e=\"video-desc\"]",
+    "[data-e2e=\"browse-video-desc\"]"
+  ],
+  "author_selectors": [
+    "[data-e2e=\"video-author-uniqueid\"]",
+    "[data-e2e=\"video-author\"]",
+    "a[href^=\"/@\"]"
+  ],
+  "author_handle_selectors": [
+    "a[href^=\"/@\"]"
+  ],
+  "canonical_url_selectors": [
+    "a[href*=\"/video/\"]",
+    "link[rel=\"canonical\"]",
+    "meta[property=\"og:url\"]"
+  ],
+  "media_selectors": [
+    "meta[property=\"og:image\"]",
+    "img",
+    "video source",
+    "video"
+  ],
+  "fallback_selectors": {
+    "text": [
+      "meta[name=\"description\"]",
+      "title"
+    ],
+    "author_name": [],
+    "author_handle": [],
+    "canonical_url": [
+      "meta[property=\"og:url\"]"
+    ],
+    "media": [
+      "meta[property=\"og:image\"]",
+      "img"
+    ]
+  }
+}

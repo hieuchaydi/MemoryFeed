@@ -1,0 +1,27 @@
+{
+  "platform": "unknown",
+  "candidate_selector": "article, main, section",
+  "text_selectors": [
+    "meta[name=\"description\"]",
+    "p"
+  ],
+  "author_selectors": [],
+  "author_handle_selectors": [],
+  "canonical_url_selectors": [
+    "link[rel=\"canonical\"]"
+  ],
+  "media_selectors": [
+    "img"
+  ],
+  "fallback_selectors": {
+    "text": [
+      "title"
+    ],
+    "author_name": [],
+    "author_handle": [],
+    "canonical_url": [
+      "meta[property=\"og:url\"]"
+    ],
+    "media": []
+  }
+}

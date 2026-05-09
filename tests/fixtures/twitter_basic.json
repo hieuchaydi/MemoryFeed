@@ -1,0 +1,12 @@
+{
+  "platform": "twitter",
+  "url": "https://x.com/alice/status/111",
+  "canonical_url": "https://x.com/alice/status/111",
+  "text_content": "MemoryFeed v0.4.0 shipping today #memory #ai",
+  "author_name": "Alice Nguyen",
+  "author_handle": "@alice",
+  "media_urls": [
+    "https://pbs.twimg.com/media/abc.jpg"
+  ],
+  "quality_flags": []
+}

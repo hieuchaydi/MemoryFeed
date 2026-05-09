@@ -69,6 +69,8 @@ class Searcher:
             item = items_by_id.get(item_id)
             if not item:
                 continue
+            if item.get("archived_at"):
+                continue
             captured_dt = _parse_iso(item.get("captured_at"))
             if cutoff and captured_dt and captured_dt < cutoff:
                 continue
@@ -94,9 +96,19 @@ class Searcher:
                     "note": item.get("note"),
                     "tags": item.get("tags", []),
                     "heat": float(item.get("heat", 1.0) or 1.0),
+                    "importance_score": float(item.get("importance_score", 0.0) or 0.0),
+                    "resurfacing_score": float(item.get("resurfacing_score", 0.0) or 0.0),
+                    "recency_score": float(item.get("recency_score", 0.0) or 0.0),
+                    "recurrence_score": float(item.get("recurrence_score", 0.0) or 0.0),
                     "last_surfaced": item.get("last_surfaced"),
                     "surfaced_count": int(item.get("surfaced_count", 0) or 0),
                     "archived_at": item.get("archived_at"),
+                    "related_topics": item.get("related_topics", []),
+                    "related_entities": item.get("related_entities", []),
+                    "cluster_id": item.get("cluster_id"),
+                    "semantic_group": item.get("semantic_group"),
+                    "suspicious_prompt_content": bool(item.get("suspicious_prompt_content", False)),
+                    "embedding_skipped_reason": item.get("embedding_skipped_reason"),
                 }
             )
             if len(merged) >= limit:

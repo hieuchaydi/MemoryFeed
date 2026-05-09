@@ -1,0 +1,42 @@
+{
+  "platform": "facebook",
+  "candidate_selector": "[role=\"article\"], .x1iorvi4",
+  "text_selectors": [
+    "[data-ad-preview]",
+    ".xdj266r",
+    "[data-ad-comet-preview=\"message\"]"
+  ],
+  "author_selectors": [
+    "h3 a[role=\"link\"]",
+    "a[role=\"link\"] strong",
+    "strong"
+  ],
+  "author_handle_selectors": [
+    "a[href*=\"facebook.com/\"]"
+  ],
+  "canonical_url_selectors": [
+    "a[href*=\"/posts/\"]",
+    "a[href*=\"/permalink/\"]",
+    "a[href*=\"story_fbid=\"]"
+  ],
+  "media_selectors": [
+    "img[referrerpolicy]",
+    "video source",
+    "video"
+  ],
+  "fallback_selectors": {
+    "text": [
+      "meta[name=\"description\"]"
+    ],
+    "author_name": [],
+    "author_handle": [],
+    "canonical_url": [
+      "link[rel=\"canonical\"]",
+      "meta[property=\"og:url\"]"
+    ],
+    "media": [
+      "meta[property=\"og:image\"]",
+      "img"
+    ]
+  }
+}

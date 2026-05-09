@@ -17,6 +17,13 @@ class RuntimeConfig:
     mcp_allow_timeline: bool
     mcp_allow_active_feed: bool
     mcp_redact_output: bool
+    memory_semantic_dedupe: bool
+    memory_dedupe_similarity_threshold: float
+    memory_sanitize_prompt_content: bool
+    memory_skip_sensitive_embedding: bool
+    memory_retention_days: int
+    memory_auto_archive: bool
+    memory_archive_low_score_threshold: float
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -30,6 +37,19 @@ def env_int(name: str, default: int, min_value: int = 1, max_value: int | None =
     raw = os.getenv(name, str(default)).strip()
     try:
         parsed = int(raw)
+    except ValueError:
+        parsed = default
+    if parsed < min_value:
+        parsed = min_value
+    if max_value is not None and parsed > max_value:
+        parsed = max_value
+    return parsed
+
+
+def env_float(name: str, default: float, min_value: float = 0.0, max_value: float | None = None) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        parsed = float(raw)
     except ValueError:
         parsed = default
     if parsed < min_value:
@@ -56,6 +76,23 @@ def load_runtime_config() -> RuntimeConfig:
         mcp_allow_timeline=env_flag("MEMORYFEED_MCP_ALLOW_TIMELINE", default=False),
         mcp_allow_active_feed=env_flag("MEMORYFEED_MCP_ALLOW_ACTIVE_FEED", default=True),
         mcp_redact_output=env_flag("MEMORYFEED_MCP_REDACT_OUTPUT", default=True),
+        memory_semantic_dedupe=env_flag("MEMORY_SEMANTIC_DEDUPE", default=True),
+        memory_dedupe_similarity_threshold=env_float(
+            "MEMORY_DEDUPE_SIMILARITY_THRESHOLD",
+            default=0.92,
+            min_value=0.5,
+            max_value=0.999,
+        ),
+        memory_sanitize_prompt_content=env_flag("MEMORY_SANITIZE_PROMPT_CONTENT", default=True),
+        memory_skip_sensitive_embedding=env_flag("MEMORY_SKIP_SENSITIVE_EMBEDDING", default=True),
+        memory_retention_days=env_int("MEMORY_RETENTION_DAYS", default=365, min_value=7, max_value=36500),
+        memory_auto_archive=env_flag("MEMORY_AUTO_ARCHIVE", default=True),
+        memory_archive_low_score_threshold=env_float(
+            "MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD",
+            default=0.35,
+            min_value=0.0,
+            max_value=1.0,
+        ),
     )
 
 

@@ -6,8 +6,10 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+from backend.memory_graph import infer_url_domain
 from backend.models import CaptureRequest
 from backend.native_accel import normalize_text_fast
+from backend.safety import detect_prompt_injection
 
 MAX_TEXT_LEN = 2000
 TRACKING_QUERY_KEYS = {
@@ -224,6 +226,8 @@ def normalize_capture(payload: CaptureRequest) -> dict:
         if flag not in quality_flags:
             quality_flags.append(flag)
 
+    safety = detect_prompt_injection(text)
+
     normalized = {
         "id": str(uuid.uuid4()),
         "url": payload.url.strip(),
@@ -242,6 +246,9 @@ def normalize_capture(payload: CaptureRequest) -> dict:
         "source_context": payload.source_context,
         "quality_flags": quality_flags,
         "capture_debug": payload.capture_debug or {},
+        "url_domain": infer_url_domain(canonical_url or payload.url.strip()),
+        "suspicious_prompt_content": bool(safety["suspicious"]),
+        "safety_signals": list(safety["signals"]),
         "captured_at": captured_at_iso,
         "dwell_seconds": round(float(payload.dwell_seconds), 3),
         "embedding_done": 0,

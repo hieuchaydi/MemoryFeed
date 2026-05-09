@@ -8,14 +8,21 @@
 
   const platform = detectPlatform(window.location.hostname);
 
-  const CONFIG = {
+  const DEFAULT_CONFIG = {
     facebook: {
       candidate: '[role="article"], .x1iorvi4',
       text: ['[data-ad-preview]', '.xdj266r', '[data-ad-comet-preview="message"]'],
       authorName: ['h3 a[role="link"]', 'a[role="link"] strong', 'strong'],
       authorHandle: ['a[href*="facebook.com/"]'],
       url: ['a[href*="/posts/"]', 'a[href*="/permalink/"]', 'a[href*="story_fbid="]'],
-      media: ['img[referrerpolicy]', 'video source', 'video']
+      media: ['img[referrerpolicy]', 'video source', 'video'],
+      fallback: {
+        text: ['meta[name="description"]'],
+        authorName: [],
+        authorHandle: [],
+        url: ['link[rel="canonical"]', 'meta[property="og:url"]'],
+        media: ['meta[property="og:image"]', 'img']
+      }
     },
     twitter: {
       candidate: 'article[data-testid="tweet"]',
@@ -23,7 +30,14 @@
       authorName: ['div[data-testid="User-Name"] span', 'a[role="link"] span'],
       authorHandle: ['a[href^="/"][role="link"]'],
       url: ['a[href*="/status/"]'],
-      media: ['img[src*="pbs.twimg.com"]', 'video source', 'video']
+      media: ['img[src*="pbs.twimg.com"]', 'video source', 'video'],
+      fallback: {
+        text: ['meta[name="description"]', 'title'],
+        authorName: [],
+        authorHandle: [],
+        url: ['link[rel="canonical"]', 'meta[property="og:url"]'],
+        media: ['meta[property="og:image"]', 'img']
+      }
     },
     youtube: {
       candidate: 'ytd-watch-flexy, ytd-backstage-post-thread-renderer, ytd-rich-item-renderer, #primary',
@@ -31,7 +45,14 @@
       authorName: ['#owner-name a', 'ytd-channel-name a', '#author-text'],
       authorHandle: ['#owner-name a[href*="/@"]', 'ytd-channel-name a[href*="/@"]'],
       url: ['link[rel="canonical"]'],
-      media: ['meta[property="og:image"]', 'img[src*="ytimg.com"]', 'video source']
+      media: ['meta[property="og:image"]', 'img[src*="ytimg.com"]', 'video source'],
+      fallback: {
+        text: ['meta[name="description"]', 'title'],
+        authorName: [],
+        authorHandle: [],
+        url: ['meta[property="og:url"]'],
+        media: ['img']
+      }
     },
     linkedin: {
       candidate: '.feed-shared-update-v2, .scaffold-finite-scroll__content article',
@@ -39,7 +60,14 @@
       authorName: ['.update-components-actor__name', '.feed-shared-actor__name', '.feed-shared-actor__title span'],
       authorHandle: ['a[href*="/in/"]'],
       url: ['a[href*="/feed/update/"]', 'a[href*="/posts/"]'],
-      media: ['img', 'video source', 'video']
+      media: ['img', 'video source', 'video'],
+      fallback: {
+        text: ['meta[name="description"]', 'title'],
+        authorName: [],
+        authorHandle: [],
+        url: ['link[rel="canonical"]', 'meta[property="og:url"]'],
+        media: ['meta[property="og:image"]']
+      }
     },
     tiktok: {
       candidate:
@@ -48,7 +76,14 @@
       authorName: ['[data-e2e="video-author-uniqueid"]', '[data-e2e="video-author"]', 'a[href^="/@"]'],
       authorHandle: ['a[href^="/@"]'],
       url: ['a[href*="/video/"]', 'link[rel="canonical"]', 'meta[property="og:url"]'],
-      media: ['meta[property="og:image"]', 'img', 'video source', 'video']
+      media: ['meta[property="og:image"]', 'img', 'video source', 'video'],
+      fallback: {
+        text: ['meta[name="description"]', 'title'],
+        authorName: [],
+        authorHandle: [],
+        url: ['meta[property="og:url"]'],
+        media: ['meta[property="og:image"]', 'img']
+      }
     },
     unknown: {
       candidate: 'article, main, section',
@@ -56,9 +91,63 @@
       authorName: [],
       authorHandle: [],
       url: ['link[rel="canonical"]'],
-      media: ['img']
+      media: ['img'],
+      fallback: {
+        text: ['title'],
+        authorName: [],
+        authorHandle: [],
+        url: ['meta[property="og:url"]'],
+        media: []
+      }
     }
   };
+
+  let CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+
+  function normalizeArray(value) {
+    if (!Array.isArray(value)) return [];
+    return value.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim());
+  }
+
+  function normalizeConfig(raw, fallbackCfg) {
+    const fallback = raw?.fallback_selectors || {};
+    return {
+      candidate: typeof raw?.candidate_selector === "string" && raw.candidate_selector.trim() ? raw.candidate_selector.trim() : fallbackCfg.candidate,
+      text: normalizeArray(raw?.text_selectors).length ? normalizeArray(raw?.text_selectors) : fallbackCfg.text,
+      authorName: normalizeArray(raw?.author_selectors).length ? normalizeArray(raw?.author_selectors) : fallbackCfg.authorName,
+      authorHandle: normalizeArray(raw?.author_handle_selectors).length ? normalizeArray(raw?.author_handle_selectors) : fallbackCfg.authorHandle,
+      url: normalizeArray(raw?.canonical_url_selectors).length ? normalizeArray(raw?.canonical_url_selectors) : fallbackCfg.url,
+      media: normalizeArray(raw?.media_selectors).length ? normalizeArray(raw?.media_selectors) : fallbackCfg.media,
+      fallback: {
+        text: normalizeArray(fallback?.text),
+        authorName: normalizeArray(fallback?.author_name),
+        authorHandle: normalizeArray(fallback?.author_handle),
+        url: normalizeArray(fallback?.canonical_url),
+        media: normalizeArray(fallback?.media)
+      }
+    };
+  }
+
+  async function loadSelectorJson(name) {
+    try {
+      const path = ext.runtime.getURL(`selectors/${name}.json`);
+      const resp = await fetch(path, { cache: "no-store" });
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function loadSelectorRegistry() {
+    const names = ["unknown", platform];
+    for (const name of names) {
+      const raw = await loadSelectorJson(name);
+      if (!raw) continue;
+      const fallbackCfg = DEFAULT_CONFIG[name] || DEFAULT_CONFIG.unknown;
+      CONFIG[name] = normalizeConfig(raw, fallbackCfg);
+    }
+  }
 
   ext.runtime.sendMessage({
     type: "MEMORYFEED_PING",
@@ -177,8 +266,8 @@
     }
   }
 
-  function firstText(selectors, roots) {
-    for (const selector of selectors || []) {
+  function firstText(selectors, fallbackSelectors, roots) {
+    for (const selector of [...(selectors || []), ...(fallbackSelectors || [])]) {
       for (const root of roots) {
         const node = findNode(root, selector);
         const value = readNodeText(node, selector);
@@ -190,8 +279,8 @@
     return { value: "", selector: "" };
   }
 
-  function firstUrl(selectors, roots) {
-    for (const selector of selectors || []) {
+  function firstUrl(selectors, fallbackSelectors, roots) {
+    for (const selector of [...(selectors || []), ...(fallbackSelectors || [])]) {
       for (const root of roots) {
         const node = findNode(root, selector);
         const value = readNodeUrl(node, selector);
@@ -203,11 +292,11 @@
     return { value: "", selector: "" };
   }
 
-  function collectUrls(selectors, roots) {
+  function collectUrls(selectors, fallbackSelectors, roots) {
     const seen = new Set();
     const output = [];
     const selectorUsed = [];
-    for (const selector of selectors || []) {
+    for (const selector of [...(selectors || []), ...(fallbackSelectors || [])]) {
       for (const root of roots) {
         const nodes = findNodes(root, selector);
         for (const node of nodes) {
@@ -401,13 +490,14 @@
 
   function extractByPlatform(element, platformName, dwellSeconds) {
     const cfg = CONFIG[platformName] || CONFIG.unknown;
+    const fallback = cfg.fallback || {};
     const roots = [element, document];
 
-    const textData = firstText(cfg.text, roots);
-    const authorNameData = firstText(cfg.authorName, roots);
-    const authorHandleData = firstText(cfg.authorHandle, roots);
-    const urlData = firstUrl(cfg.url, roots);
-    const mediaData = collectUrls(cfg.media, roots);
+    const textData = firstText(cfg.text, fallback.text, roots);
+    const authorNameData = firstText(cfg.authorName, fallback.authorName, roots);
+    const authorHandleData = firstText(cfg.authorHandle, fallback.authorHandle, roots);
+    const urlData = firstUrl(cfg.url, fallback.url, roots);
+    const mediaData = collectUrls(cfg.media, fallback.media, roots);
 
     const titleFallback = cleanText(document.title || "");
     const descriptionFallback = cleanText(document.querySelector('meta[name="description"]')?.getAttribute("content") || "");
@@ -479,6 +569,9 @@
   });
 
   observeCandidates(document);
+  void loadSelectorRegistry().then(() => {
+    observeCandidates(document);
+  });
   mutationObserver.observe(document.body, { childList: true, subtree: true });
 
   if (platform === "tiktok") {

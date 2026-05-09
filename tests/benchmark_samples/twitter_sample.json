@@ -1,0 +1,7 @@
+{
+  "version": "0.4.0",
+  "platform": "twitter",
+  "success_rate": 0.94,
+  "duplicate_rate": 0.03,
+  "missing_field_rate": 0.02
+}

@@ -1,48 +1,58 @@
 {
-  "manifest_version": 3,
-  "name": "MemoryFeed",
-  "version": "0.3.0",
-  "description": "Local-first social memory capture",
-  "action": {
-    "default_title": "MemoryFeed",
-    "default_popup": "popup.html"
-  },
-  "permissions": [
-    "storage",
-    "tabs"
-  ],
-  "host_permissions": [
-    "http://localhost:7749/*",
-    "https://www.facebook.com/*",
-    "https://x.com/*",
-    "https://twitter.com/*",
-    "https://www.youtube.com/*",
-    "https://www.linkedin.com/*",
-    "https://www.tiktok.com/*"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://www.facebook.com/*",
-        "https://x.com/*",
-        "https://twitter.com/*",
-        "https://www.youtube.com/*",
-        "https://www.linkedin.com/*",
-        "https://www.tiktok.com/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "memoryfeed@local.dev",
-      "strict_min_version": "121.0"
-    }
-  }
+    "manifest_version":  3,
+    "name":  "MemoryFeed",
+    "version":  "0.4.0",
+    "description":  "Local-first social memory capture",
+    "action":  {
+                   "default_title":  "MemoryFeed",
+                   "default_popup":  "popup.html"
+               },
+    "permissions":  [
+                        "storage",
+                        "tabs"
+                    ],
+    "host_permissions":  [
+                             "http://localhost:7749/*",
+                             "https://www.facebook.com/*",
+                             "https://x.com/*",
+                             "https://twitter.com/*",
+                             "https://www.youtube.com/*",
+                             "https://www.linkedin.com/*",
+                             "https://www.tiktok.com/*"
+                         ],
+    "background":  {
+                       "service_worker":  "background.js"
+                   },
+    "content_scripts":  [
+                            {
+                                "matches":  [
+                                                "https://www.facebook.com/*",
+                                                "https://x.com/*",
+                                                "https://twitter.com/*",
+                                                "https://www.youtube.com/*",
+                                                "https://www.linkedin.com/*",
+                                                "https://www.tiktok.com/*"
+                                            ],
+                                "js":  [
+                                           "content.js"
+                                       ],
+                                "run_at":  "document_idle"
+                            }
+                        ],
+    "browser_specific_settings":  {
+                                      "gecko":  {
+                                                    "id":  "memoryfeed@local.dev",
+                                                    "strict_min_version":  "121.0"
+                                                }
+                                  },
+    "web_accessible_resources":  [
+                                     {
+                                         "matches":  [
+                                                         "\u003call_urls\u003e"
+                                                     ],
+                                         "resources":  [
+                                                           "selectors/*.json"
+                                                       ]
+                                     }
+                                 ]
 }

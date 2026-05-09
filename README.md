@@ -13,6 +13,13 @@ MemoryFeed is a local-first social memory system:
 - Optional C++ native acceleration speeds critical ranking/text ops.
 - Item metadata management (star/note/tags), export/import, and queue observability.
 - Active Feed ranks memories by personal heat, decay, resurfacing gap, and current context.
+- Memory intelligence foundations: related topics/entities, semantic groups, cluster ids, inferred links.
+- Explainable ranking foundations: importance/resurfacing/recency/recurrence scores.
+- Semantic near-duplicate layer (local-only, configurable threshold) on top of fingerprint dedupe.
+- Prompt-injection boundary + suspicious content flagging for safer AI workflows.
+- Sensitive-content pre-embedding skip (store local, skip vectorization, log reason).
+- Schema migrations (`memoryfeed migrate`), retention/archival foundations, and benchmark snapshot history.
+- Declarative extractor selectors and local replay tooling for DOM regression testing.
 
 Local-first by default. Captured data is stored locally. Optional cloud AI providers may process selected text/images only when explicitly configured.
 
@@ -188,6 +195,7 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `POST /api/resurface`
 - `POST /api/feed/surfaced`
 - `POST /api/feed/archive`
+- `POST /api/feed/unarchive`
 - `GET /api/timeline`
 - `GET /api/stats`
 - `GET /api/native/status`
@@ -197,6 +205,7 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `PATCH /api/items/{id}`
 - `POST /api/admin/export`
 - `POST /api/admin/import`
+- `POST /api/admin/benchmark/snapshot`
 - `DELETE /api/admin/reset?confirm=RESET`
 - `GET /healthz`
 
@@ -206,9 +215,12 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 memoryfeed serve
 memoryfeed serve-web --host 0.0.0.0 --port 7749
 memoryfeed mcp --transport stdio
+memoryfeed migrate
 memoryfeed doctor
 memoryfeed doctor --format json
 memoryfeed search "that angry cat meme last week"
+memoryfeed replay tests/fixtures/twitter_basic.html
+memoryfeed extractor test twitter
 memoryfeed timeline
 memoryfeed feed --mode focus
 memoryfeed resurface "Docker networking CNI overlay Cilium"
@@ -252,11 +264,27 @@ MCP controls:
 - `MEMORYFEED_MCP_ALLOW_TIMELINE=false`
 - `MEMORYFEED_MCP_ALLOW_ACTIVE_FEED=true`
 - `MEMORYFEED_MCP_REDACT_OUTPUT=true`
+- `MEMORY_SANITIZE_PROMPT_CONTENT=true`
+
+Memory intelligence & retention:
+- `MEMORY_SEMANTIC_DEDUPE=true`
+- `MEMORY_DEDUPE_SIMILARITY_THRESHOLD=0.92`
+- `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`
+- `MEMORY_RETENTION_DAYS=365`
+- `MEMORY_AUTO_ARCHIVE=true`
+- `MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD=0.35`
 
 Logging:
 - `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`
 - `MEMORYFEED_LOG_FORMAT=plain|json`
 - `MEMORYFEED_LOG_FILE=/custom/path/memoryfeed.log`
+
+## Data Classification
+
+- Local-only primary data: captured URLs, text snippets, metadata, local cache images, SQLite rows, vector index, benchmark snapshots.
+- Derived metadata: `related_topics`, `related_entities`, `cluster_id`, `semantic_group`, ranking scores, quality/safety flags, link edges (`memory_links`).
+- Embedded/vectorized fields: normalized text + image captions (when embedding is enabled and content is not flagged sensitive).
+- Skippable for privacy/safety: embeddings may be skipped with `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`; MCP output text may be sanitized with `MEMORY_SANITIZE_PROMPT_CONTENT=true`.
 
 ## Version Mapping
 

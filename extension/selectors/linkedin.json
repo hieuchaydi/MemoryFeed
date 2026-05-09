@@ -1,0 +1,41 @@
+{
+  "platform": "linkedin",
+  "candidate_selector": ".feed-shared-update-v2, .scaffold-finite-scroll__content article",
+  "text_selectors": [
+    ".feed-shared-text",
+    ".update-components-text",
+    ".update-components-update-v2__commentary"
+  ],
+  "author_selectors": [
+    ".update-components-actor__name",
+    ".feed-shared-actor__name",
+    ".feed-shared-actor__title span"
+  ],
+  "author_handle_selectors": [
+    "a[href*=\"/in/\"]"
+  ],
+  "canonical_url_selectors": [
+    "a[href*=\"/feed/update/\"]",
+    "a[href*=\"/posts/\"]"
+  ],
+  "media_selectors": [
+    "img",
+    "video source",
+    "video"
+  ],
+  "fallback_selectors": {
+    "text": [
+      "meta[name=\"description\"]",
+      "title"
+    ],
+    "author_name": [],
+    "author_handle": [],
+    "canonical_url": [
+      "link[rel=\"canonical\"]",
+      "meta[property=\"og:url\"]"
+    ],
+    "media": [
+      "meta[property=\"og:image\"]"
+    ]
+  }
+}

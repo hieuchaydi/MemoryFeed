@@ -81,3 +81,40 @@
 - Distributed multi-user mode: deferred.
 - Remote sync and multi-device replication: deferred.
 - GPU-specific native acceleration roadmap: deferred until baseline usage metrics.
+
+## 14) Memory Graph Foundations (v0.4.0)
+- Keep storage on SQLite; do not introduce a graph database yet.
+- Add optional item-level semantic fields (`related_topics`, `related_entities`, `cluster_id`, `semantic_group`).
+- Persist inferred edges in local `memory_links` table for replay/debug and future graph UI.
+- Relationship inference stays heuristic and explainable (domain, topic/entity recurrence, local similarity).
+
+## 15) Explainable Ranking Foundations (v0.4.0)
+- Add four explicit scores: `importance_score`, `resurfacing_score`, `recency_score`, `recurrence_score`.
+- Keep scoring heuristic-based for now; no mandatory ML ranking service.
+- Store `ranking_debug` metadata for auditability and future tuning.
+
+## 16) Dedupe Strategy Update (v0.4.0)
+- Preserve fingerprint dedupe as first layer.
+- Add optional semantic near-duplicate layer (`MEMORY_SEMANTIC_DEDUPE=true`) with configurable threshold.
+- Keep all dedupe local-only and offline-capable.
+
+## 17) Extractor Maintainability (v0.4.0)
+- Move selector logic toward declarative JSON configs per platform.
+- Keep hardcoded in-script fallback selectors to avoid regressions when config loading fails.
+- Add fixture replay tooling (`memoryfeed replay`, `memoryfeed extractor test`) for DOM drift regression checks.
+
+## 18) Safety and Privacy Boundary (v0.4.0)
+- Treat captured text as untrusted input.
+- Add prompt-injection heuristic flag (`suspicious_prompt_content`) instead of destructive deletion.
+- Add pre-embedding sensitive scan; skip embedding when configured, but still store local raw capture.
+- MCP output can sanitize suspicious instruction-like text while preserving useful context.
+
+## 19) Schema Evolution (v0.4.0)
+- Introduce numbered migration framework under `backend/migrations/`.
+- Track `schema_version` in DB `meta` table.
+- Keep migrations idempotent and backward-compatible.
+
+## 20) Retention and Archival (v0.4.0)
+- Introduce reversible archival (no destructive auto-delete).
+- Default search/feed excludes archived entries.
+- Track `archive_reason` for explainability and operations.

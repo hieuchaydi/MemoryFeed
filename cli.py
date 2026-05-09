@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 
+from backend.extractor_replay import replay_fixture, test_platform_fixtures
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
 from backend.llm_clients import (
@@ -25,6 +26,7 @@ from backend.llm_clients import (
     providers_snapshot,
 )
 from backend.doctor import run_doctor
+from backend.migrate import run_migrations
 from backend.native_accel import status as native_status
 from backend.runtime_config import is_public_bind_host, load_runtime_config
 from backend.searcher import Searcher
@@ -127,6 +129,78 @@ def mcp_server(transport: str, host: str, port: int, path: str) -> None:
         sys.exit(1)
 
     run_mcp(transport=transport, host=host, port=port, path=path)
+
+
+@cli.command("migrate")
+@click.option("--target-version", default=None, type=int, help="Run migrations up to target version")
+def migrate_command(target_version: int | None) -> None:
+    """Run schema migrations."""
+    report = run_migrations(target_version=target_version)
+    table = Table(title="MemoryFeed Migrations")
+    table.add_column("Before")
+    table.add_column("After")
+    table.add_column("Latest")
+    table.add_row(str(report["before"]), str(report["after"]), str(report["latest"]))
+    console.print(table)
+    if report["applied"]:
+        for step in report["applied"]:
+            console.print(f"- applied #{step['revision']}: {step['name']}")
+    else:
+        console.print("No pending migrations.")
+
+
+@cli.command("replay")
+@click.argument("fixture_html", type=click.Path(exists=True, dir_okay=False))
+@click.option("--expected", "expected_snapshot", default=None, help="Optional expected snapshot JSON")
+@click.option("--json-output", is_flag=True, help="Print JSON output")
+def replay_command(fixture_html: str, expected_snapshot: str | None, json_output: bool) -> None:
+    """Replay extractor against saved fixture HTML."""
+    result = replay_fixture(fixture_html, expected_snapshot=expected_snapshot)
+    payload = {
+        "fixture": result.fixture,
+        "platform": result.platform,
+        "extracted": result.extracted,
+        "selector_used": result.selector_used,
+        "missing_fields": result.missing_fields,
+        "quality_flags": result.quality_flags,
+        "matches_expected": result.matches_expected,
+        "mismatch_keys": result.mismatch_keys,
+    }
+    if json_output:
+        console.print_json(json.dumps(payload, ensure_ascii=False))
+        return
+
+    console.print(f"fixture: {result.fixture}")
+    console.print(f"platform: {result.platform}")
+    console.print(f"matches_expected: {result.matches_expected}")
+    console.print(f"selector_used: {json.dumps(result.selector_used, ensure_ascii=False)}")
+    console.print(f"missing_fields: {', '.join(result.missing_fields) if result.missing_fields else '(none)'}")
+    console.print(f"quality_flags: {', '.join(result.quality_flags) if result.quality_flags else '(none)'}")
+    console.print(f"extracted: {json.dumps(result.extracted, ensure_ascii=False)}")
+
+
+@cli.group("extractor")
+def extractor_group() -> None:
+    """Extractor diagnostics and fixture tests."""
+
+
+@extractor_group.command("test")
+@click.argument("platform", type=click.Choice(["facebook", "twitter", "youtube", "linkedin", "tiktok"], case_sensitive=False))
+@click.option("--json-output", is_flag=True, help="Print JSON output")
+def extractor_test_command(platform: str, json_output: bool) -> None:
+    """Run fixture-based extractor tests by platform."""
+    report = test_platform_fixtures(platform.lower())
+    if json_output:
+        console.print_json(json.dumps(report, ensure_ascii=False))
+        return
+    console.print(
+        f"platform={report['platform']} fixtures={report['fixtures']} passed={report['passed']} failed={report['failed']}"
+    )
+    for row in report["results"]:
+        status = "PASS" if row["matches_expected"] else "FAIL"
+        console.print(
+            f"[{status}] {Path(str(row['fixture'])).name} missing={row['missing_fields']} mismatch={row['mismatch_keys']}"
+        )
 
 
 @cli.command()

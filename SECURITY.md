@@ -43,7 +43,16 @@ MemoryFeed is local-first: captured memories are stored on the local machine by 
   - bounded result counts (`MEMORYFEED_MCP_MAX_RESULTS`)
   - timeline disabled by default (`MEMORYFEED_MCP_ALLOW_TIMELINE=false`)
   - output redaction enabled by default (`MEMORYFEED_MCP_REDACT_OUTPUT=true`)
+  - optional prompt-content sanitization (`MEMORY_SANITIZE_PROMPT_CONTENT=true`)
   - audit logging for MCP calls (timestamp, tool, query, result count)
+- Prompt injection boundary:
+  - captured text treated as untrusted input
+  - suspicious patterns are flagged (`suspicious_prompt_content=true`) for operator review
+  - content is not auto-deleted by default
+- Sensitive pre-embedding filter:
+  - detect API keys, bearer tokens, emails, invite links, and secret-like strings
+  - skip vectorization when `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`
+  - local storage still preserved (capture is not dropped)
 - Extension host permissions scoped to explicit domains (no wildcard `https://*/*`)
 - Export/delete controls:
   - explicit admin endpoints
@@ -60,6 +69,12 @@ When MCP redaction is enabled, obvious patterns are masked in outputs:
 - Bearer tokens
 
 Redaction is best-effort and pattern-based. It is not a formal DLP system.
+
+## v0.4.0 Safety Notes
+
+- Suspicious prompt-like content is metadata-flagged, not blocked.
+- MCP sanitization modifies output rendering only; source rows stay local and unchanged.
+- Embedding skip reasons are logged structurally (without raw secret values).
 
 ## Operational Guidance
 

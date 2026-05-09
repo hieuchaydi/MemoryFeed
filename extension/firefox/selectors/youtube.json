@@ -1,0 +1,41 @@
+{
+  "platform": "youtube",
+  "candidate_selector": "ytd-watch-flexy, ytd-backstage-post-thread-renderer, ytd-rich-item-renderer, #primary",
+  "text_selectors": [
+    "#description-inline-expander",
+    "#description-inner",
+    "h1.ytd-watch-metadata",
+    "h1.title"
+  ],
+  "author_selectors": [
+    "#owner-name a",
+    "ytd-channel-name a",
+    "#author-text"
+  ],
+  "author_handle_selectors": [
+    "#owner-name a[href*=\"/@\"]",
+    "ytd-channel-name a[href*=\"/@\"]"
+  ],
+  "canonical_url_selectors": [
+    "link[rel=\"canonical\"]"
+  ],
+  "media_selectors": [
+    "meta[property=\"og:image\"]",
+    "img[src*=\"ytimg.com\"]",
+    "video source"
+  ],
+  "fallback_selectors": {
+    "text": [
+      "meta[name=\"description\"]",
+      "title"
+    ],
+    "author_name": [],
+    "author_handle": [],
+    "canonical_url": [
+      "meta[property=\"og:url\"]"
+    ],
+    "media": [
+      "img"
+    ]
+  }
+}

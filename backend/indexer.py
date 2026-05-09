@@ -11,6 +11,10 @@ import lancedb
 import pyarrow as pa
 from sentence_transformers import SentenceTransformer
 
+from backend.embeddings import build_semantic_text
+from backend.logging import log_event
+from backend.redaction import scan_sensitive_content
+from backend.runtime_config import load_runtime_config
 from backend.store import LANCEDB_DIR, Store
 
 logger = logging.getLogger(__name__)
@@ -103,9 +107,24 @@ class IndexerService:
         if not item:
             return
 
-        combined = _build_embedding_text(item)
+        combined = build_semantic_text(item)
         if not combined:
             await asyncio.to_thread(self.store.mark_embedding_done, item_id)
+            return
+
+        cfg = load_runtime_config()
+        sensitive_scan = scan_sensitive_content(combined)
+        if cfg.memory_skip_sensitive_embedding and sensitive_scan["sensitive"]:
+            reason = "sensitive:" + ",".join(sensitive_scan["reasons"])
+            await asyncio.to_thread(self.store.mark_embedding_skipped, item_id, reason)
+            log_event(
+                logger,
+                "embedding_skipped",
+                platform=item.get("platform", "unknown"),
+                item_id=item_id,
+                embedding_skipped_reason=reason,
+                suspicious_prompt_content=bool(item.get("suspicious_prompt_content", False)),
+            )
             return
 
         model = await asyncio.to_thread(self._load_model)
@@ -124,6 +143,13 @@ class IndexerService:
         self._table_non_empty = True
         self._table_check_at = time.monotonic()
         await asyncio.to_thread(self.store.mark_embedding_done, item_id)
+        log_event(
+            logger,
+            "embedding_indexed",
+            platform=item.get("platform", "unknown"),
+            item_id=item_id,
+            suspicious_prompt_content=bool(item.get("suspicious_prompt_content", False)),
+        )
 
     async def semantic_search(self, query: str, limit: int = 20) -> list[SemanticHit]:
         if not query.strip():
@@ -199,15 +225,3 @@ class IndexerService:
 
 
 import contextlib
-
-
-def _build_embedding_text(item: dict[str, Any]) -> str:
-    text = (item.get("text_content") or "").strip()
-    captions = " ".join(item.get("image_captions") or []).strip()
-    merged = (text + "\n" + captions).strip()
-    if not merged:
-        return ""
-    words = merged.split()
-    if len(words) > 512:
-        words = words[:512]
-    return " ".join(words)

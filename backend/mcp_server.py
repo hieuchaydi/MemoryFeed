@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
 
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
 from backend.llm_clients import check_gemini_connectivity, check_groq_connectivity, providers_snapshot
+from backend.logging import log_event
 from backend.logging_setup import configure_logging
 from backend.native_accel import status as native_status
 from backend.redaction import redact_value
 from backend.runtime_config import load_runtime_config, provider_requires_key
 from backend.searcher import Searcher
+from backend.safety import sanitize_untrusted_payload
 from backend.store import DATA_DIR, DB_PATH, IMAGE_CACHE_DIR, LANCEDB_DIR, Store
 
 try:
@@ -50,15 +52,18 @@ def _clamp_mcp_limit(requested: int, hard_cap: int = 50) -> int:
 
 def _finalize_tool_payload(tool_name: str, payload: dict[str, Any], query: str | None = None) -> dict[str, Any]:
     cfg = load_runtime_config()
+    if cfg.memory_sanitize_prompt_content:
+        payload = sanitize_untrusted_payload(payload)
     if cfg.mcp_redact_output:
         payload = redact_value(payload)
     result_count = int(payload.get("count", 0))
-    logger.info(
-        "mcp_audit timestamp=%s tool_name=%s query=%s result_count=%s",
-        datetime.now(timezone.utc).isoformat(),
-        tool_name,
-        (query or "")[:200],
-        result_count,
+    log_event(
+        logger,
+        "mcp_tool_result",
+        platform="mcp",
+        status=tool_name,
+        count=result_count,
+        benchmark_context={"query": (query or "")[:200]},
     )
     return payload
 

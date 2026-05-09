@@ -100,6 +100,9 @@ class InterestEngine:
     async def archive(self, item_ids: list[str]) -> int:
         return await asyncio.to_thread(self.store.archive_items, item_ids)
 
+    async def unarchive(self, item_ids: list[str]) -> int:
+        return await asyncio.to_thread(self.store.unarchive_items, item_ids)
+
     async def _decay_once_per_day(self) -> None:
         today = date.today()
         if self._last_decay_date == today:
