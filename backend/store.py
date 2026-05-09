@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
 import json
+import logging
+import re
 import sqlite3
 import threading
 import hashlib
@@ -22,6 +24,7 @@ DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"
 DB_PATH = DATA_DIR / "memoryfeed.db"
 LANCEDB_DIR = DATA_DIR / "lancedb"
 IMAGE_CACHE_DIR = DATA_DIR / "images"
+logger = logging.getLogger(__name__)
 
 
 class Store:
@@ -605,7 +608,8 @@ class Store:
         cfg = load_runtime_config()
         conn = self._connect()
         try:
-            params: list[Any] = [query]
+            normalized_query = _build_safe_fts_query(query)
+            params: list[Any] = [normalized_query]
             where = "AND items.archived_at IS NULL"
             if cfg.hide_sensitive_from_search:
                 where += " AND COALESCE(items.search_hidden, 0) = 0"
@@ -638,7 +642,13 @@ class Store:
                 ORDER BY bm25_score ASC
                 LIMIT ?
             """
-            rows = conn.execute(sql, params).fetchall()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            except sqlite3.OperationalError as exc:
+                # Fallback to phrase query for malformed user/content text that breaks FTS parser.
+                logger.warning("fts_query_fallback query=%r error=%s", query, exc)
+                fallback_params = [_build_fts_phrase_query(query), *params[1:]]
+                rows = conn.execute(sql, fallback_params).fetchall()
             return [self._row_to_search_dict(r, bm25_key="bm25_score") for r in rows]
         finally:
             conn.close()
@@ -1018,6 +1028,21 @@ def _parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
     except ValueError:
         return None
+
+
+def _build_safe_fts_query(query: str) -> str:
+    text = " ".join(str(query or "").strip().split())
+    if not text:
+        return "\"\""
+    tokens = [t for t in re.findall(r"\w+", text, flags=re.UNICODE) if t]
+    if not tokens:
+        return _build_fts_phrase_query(text)
+    return " AND ".join(f"\"{token.replace('\"', '\"\"')}\"" for token in tokens[:16])
+
+
+def _build_fts_phrase_query(query: str) -> str:
+    phrase = " ".join(str(query or "").strip().split())
+    return f"\"{phrase.replace('\"', '\"\"')}\""
 
 
 def _feed_score(item: dict[str, Any], mode: str) -> tuple[float, str, bool]:

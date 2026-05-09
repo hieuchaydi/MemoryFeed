@@ -6,7 +6,7 @@
   const ext = typeof browser !== "undefined" ? browser : chrome;
   const visibilityMap = new Map();
   const capturedKeys = new Set();
-  const capturedElements = new WeakSet();
+  let capturedElements = new WeakSet();
   const nodeAttemptMap = new WeakMap();
   const captureAttemptTimeline = [];
   const cleanupRegistry = {
@@ -278,6 +278,7 @@
     for (const node of document.querySelectorAll('[data-memoryfeed-observed=\"1\"]')) {
       delete node.dataset.memoryfeedObserved;
     }
+    capturedElements = new WeakSet();
     observer = null;
   }
 
@@ -816,6 +817,9 @@
     for (const node of document.querySelectorAll('[data-memoryfeed-observed=\"1\"]')) {
       delete node.dataset.memoryfeedObserved;
     }
+    // SPA pages (e.g. YouTube Shorts) can reuse DOM nodes across route changes.
+    // Reset per-element dedupe so newly swapped content on the same node can be captured.
+    capturedElements = new WeakSet();
     capturedKeys.clear();
     observeCandidates(document);
   }

@@ -9,6 +9,8 @@
     environment:
       OFFLINE_ONLY: "1"
       MEMORYFEED_AI_PROVIDER: "none"
+      MEMORYFEED_PUBLIC_MODE: "true"
+      MEMORYFEED_ADMIN_TOKEN: "dev-local-token"
       MEMORYFEED_DATA_DIR: "/data"
     volumes:
       - memoryfeed_data:/data

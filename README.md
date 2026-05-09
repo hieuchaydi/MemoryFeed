@@ -180,6 +180,26 @@ cd frontend; npm run dev
 Frontend dev URL: `http://localhost:5173`  
 Backend API URL: `http://localhost:7749`
 
+## Docker (local test)
+
+```bash
+docker compose up -d --build
+curl http://localhost:7749/healthz
+```
+
+PowerShell health check:
+```powershell
+curl.exe -i http://localhost:7749/healthz
+```
+
+If you see `container name "/memoryfeed" is already in use`:
+```bash
+docker rm -f memoryfeed
+docker compose up -d
+```
+
+If Docker daemon is stopped on Windows (`dockerDesktopLinuxEngine` error), start Docker Desktop first, then rerun `docker compose up -d`.
+
 ## Security Controls
 
 - Admin endpoints (`/api/admin/export`, `/api/admin/import`, `/api/admin/reset`) support Bearer token auth via `MEMORYFEED_ADMIN_TOKEN`.
