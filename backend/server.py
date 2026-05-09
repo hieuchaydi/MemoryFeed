@@ -22,8 +22,11 @@ from backend.debug import explain_archival_decision, explain_confidence_reductio
 from backend.import_export import export_payload, import_payload
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
+from backend.benchmarking import evaluate_memory_retrieval, load_default_benchmark_dataset
 from backend.logging_setup import configure_logging
 from backend.maintenance import MaintenanceScheduler
+from backend.memory_lifecycle import MemoryLifecycleEngine
+from backend.privacy_guard import verify_local_only_mode
 from backend.models import (
     ArchiveItemsRequest,
     CaptureRequest,
@@ -71,6 +74,7 @@ vision = VisionService(store, indexer)
 searcher = Searcher(store, indexer)
 interest = InterestEngine(store, searcher)
 maintenance = MaintenanceScheduler(store)
+lifecycle = MemoryLifecycleEngine(store.db_path)
 capture_metrics = collections.defaultdict(lambda: {"attempts": 0, "stored": 0, "duplicates": 0, "missing": 0})
 
 if IMAGE_CACHE_DIR.exists():
@@ -143,6 +147,9 @@ async def request_logging_middleware(request: Request, call_next) -> Response:
 @app.on_event("startup")
 async def startup_event() -> None:
     cfg = load_runtime_config()
+    privacy_report = verify_local_only_mode(cfg)
+    if not privacy_report.local_only_verified:
+        logger.warning("local_only_guard_failed violations=%s", ",".join(privacy_report.violations))
     bind_host = os.getenv("MEMORYFEED_BIND_HOST", "").strip()
     if bind_host and bind_host not in {"127.0.0.1", "localhost", "::1"} and not cfg.admin_token:
         logger.warning(
@@ -196,6 +203,9 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
         return CaptureResponse(status="duplicate", id=item_id)
 
     capture_metrics[platform]["stored"] += 1
+    memory_id = lifecycle.ensure_memory_for_item(item)
+    lifecycle.summarize_memory(memory_id, str(item.get("text_content") or ""))
+    lifecycle.apply_decay_cycle(item)
     if item.get("image_urls"):
         await vision.enqueue(item["id"])
     else:
@@ -221,7 +231,91 @@ async def search_api(
     debug: bool = Query(default=False),
 ) -> dict[str, Any]:
     results = await searcher.search(query=q, limit=limit, days_back=days_back, debug=debug)
+    for row in results:
+        lifecycle.reinforce_memory(f"mem:{row['id']}", delta=0.03)
     return {"query": q, "count": len(results), "results": results}
+
+
+@app.get("/api/memory/lifecycle/timeline")
+async def memory_lifecycle_timeline_api(limit: int = Query(default=200, ge=1, le=2000)) -> dict[str, Any]:
+    rows = await asyncio.to_thread(lifecycle.timeline, limit)
+    return {"count": len(rows), "events": rows}
+
+
+@app.get("/api/memory/visualization/heatmap")
+async def memory_heatmap_api(bucket_days: int = Query(default=7, ge=1, le=90)) -> dict[str, Any]:
+    rows = await asyncio.to_thread(lifecycle.heatmap, bucket_days)
+    return {"count": len(rows), "bucket_days": bucket_days, "cells": rows}
+
+
+@app.get("/api/memory/visualization/reinforcement-graph")
+async def memory_reinforcement_graph_api(limit: int = Query(default=300, ge=1, le=3000)) -> dict[str, Any]:
+    payload = await asyncio.to_thread(lifecycle.reinforcement_graph, limit)
+    return payload
+
+
+@app.get("/api/memory/visualization/aging")
+async def memory_aging_api(limit: int = Query(default=200, ge=1, le=2000)) -> dict[str, Any]:
+    rows = await asyncio.to_thread(lifecycle.aging, limit)
+    return {"count": len(rows), "items": rows}
+
+
+@app.get("/api/memory/retrieval-trace")
+async def memory_retrieval_trace_api(
+    q: str = Query(default="", min_length=1),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> dict[str, Any]:
+    rows = await searcher.search(query=q, limit=limit, debug=True)
+    traces = [
+        {
+            "id": row.get("id"),
+            "score": row.get("score"),
+            "trace": ((row.get("search_debug") or {}).get("retrieval_trace") or {}),
+            "matched_fields": ((row.get("search_debug") or {}).get("matched_fields") or []),
+        }
+        for row in rows
+    ]
+    return {"query": q, "count": len(traces), "results": traces}
+
+
+@app.post("/api/memory/lifecycle/decay")
+async def memory_lifecycle_decay_api(limit: int = Query(default=500, ge=1, le=5000)) -> dict[str, Any]:
+    items = await asyncio.to_thread(store.list_items, limit, 0, None, False)
+    for item in items:
+        lifecycle.apply_decay_cycle(item)
+    forgotten = lifecycle.forget_eligible()
+    return {"ok": True, "processed": len(items), "forgotten": forgotten}
+
+
+@app.post("/api/memory/lifecycle/conflict")
+async def memory_lifecycle_conflict_api(
+    memory_id: str = Query(min_length=5),
+    field_name: str = Query(min_length=1),
+    value_a: str = Query(default=""),
+    value_b: str = Query(default=""),
+    confidence_a: float = Query(default=0.5, ge=0.0, le=1.0),
+    confidence_b: float = Query(default=0.5, ge=0.0, le=1.0),
+) -> dict[str, Any]:
+    conflict_id = lifecycle.report_conflict(memory_id, field_name, value_a, value_b, confidence_a, confidence_b)
+    return {"ok": True, "conflict_id": conflict_id}
+
+
+@app.post("/api/memory/lifecycle/merge")
+async def memory_lifecycle_merge_api(
+    primary_memory_id: str = Query(min_length=5),
+    secondary_memory_id: str = Query(min_length=5),
+    confidence: float = Query(default=0.8, ge=0.0, le=1.0),
+) -> dict[str, Any]:
+    edge_id = lifecycle.merge_memories(primary_memory_id, secondary_memory_id, confidence=confidence)
+    return {"ok": True, "edge_id": edge_id}
+
+
+@app.get("/api/memory/benchmarks/evaluate")
+async def memory_benchmark_evaluate_api(limit: int = Query(default=300, ge=10, le=5000)) -> dict[str, Any]:
+    dataset = load_default_benchmark_dataset()
+    rows = await searcher.search(query="memory", limit=min(50, limit), debug=False)
+    evaluated = evaluate_memory_retrieval(dataset=dataset, retrieved_items=rows)
+    return evaluated
 
 
 @app.get("/api/timeline")
@@ -285,6 +379,12 @@ async def stats_api() -> dict[str, Any]:
     payload["queues"] = {
         "indexer": indexer.status(),
         "vision": vision.status(),
+    }
+    cfg = load_runtime_config()
+    guard = verify_local_only_mode(cfg)
+    payload["privacy_guard"] = {
+        "local_only_verified": guard.local_only_verified,
+        "violations": guard.violations,
     }
     payload["reliability_dashboard"] = build_reliability_dashboard(
         await asyncio.to_thread(store.all_items),

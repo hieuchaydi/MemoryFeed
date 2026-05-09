@@ -12,6 +12,7 @@ def explain_ranking_penalties(factors: dict[str, float]) -> dict[str, float]:
         "duplicate_penalty": float(factors.get("duplicate_penalty") or 0.0),
         "confidence_penalty": float(factors.get("confidence_penalty") or 0.0),
         "noise_penalty": float(factors.get("noise_penalty") or 0.0),
+        "stale_penalty": float(factors.get("stale_penalty") or 0.0),
     }
 
 

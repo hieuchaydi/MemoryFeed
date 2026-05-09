@@ -1,0 +1,26 @@
+[
+  {
+    "query": "docker",
+    "must_include_any": ["docker", "container", "compose"],
+    "horizon_days": 30,
+    "type": "long_term_recall"
+  },
+  {
+    "query": "latest update",
+    "must_include_any": ["latest", "update", "today"],
+    "horizon_days": 7,
+    "type": "stale_handling"
+  },
+  {
+    "query": "preference",
+    "must_include_any": ["prefer", "favorite", "usually"],
+    "horizon_days": 90,
+    "type": "consistency"
+  },
+  {
+    "query": "conflicting profile",
+    "must_include_any": ["conflict", "contradict", "changed"],
+    "horizon_days": 90,
+    "type": "contradiction"
+  }
+]

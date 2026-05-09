@@ -61,6 +61,11 @@ MEMORYFEED_AI_PROVIDER=none
 - `frontend`: React app (Search / Active Feed / Timeline / Stats).
 - `native`: pybind11 C++ module (`memoryfeed_native`) for acceleration.
 
+## Engineering Docs
+
+- Production blueprint: `docs/MEMORY_INFRASTRUCTURE_BLUEPRINT.md`
+- Docker runbook: `docs/DOCKER_README.md`
+
 ## Requirements
 
 - Python 3.12+
@@ -226,6 +231,15 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `GET /api/queues/status`
 - `GET /api/perf`
 - `GET /api/debug/item/{id}`
+- `GET /api/memory/lifecycle/timeline`
+- `POST /api/memory/lifecycle/decay`
+- `POST /api/memory/lifecycle/conflict`
+- `POST /api/memory/lifecycle/merge`
+- `GET /api/memory/visualization/heatmap`
+- `GET /api/memory/visualization/reinforcement-graph`
+- `GET /api/memory/visualization/aging`
+- `GET /api/memory/retrieval-trace`
+- `GET /api/memory/benchmarks/evaluate`
 - `GET /api/items?limit=&offset=&platform=&starred_only=`
 - `PATCH /api/items/{id}`
 - `POST /api/admin/export`

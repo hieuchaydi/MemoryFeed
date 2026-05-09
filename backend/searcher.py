@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.dedupe import diversity_rerank, near_duplicate_cluster_key
 from backend.debug import explain_archival_decision, explain_confidence_reduction, explain_ranking_penalties
-from backend.ranking import score_result
+from backend.retrieval_intelligence import score_with_trace
 from backend.runtime_config import load_runtime_config
 from backend.indexer import IndexerService
 from backend.native_accel import rrf_topk_fast
@@ -94,7 +94,13 @@ class Searcher:
             cluster = near_duplicate_cluster_key(item)
             if cluster in {r.get("_cluster") for r in merged}:
                 duplicate_penalty = 0.12
-            final_score, factors = score_result(item, base, duplicate_penalty=duplicate_penalty)
+            final_score, factors = score_with_trace(
+                item,
+                semantic_score=base,
+                duplicate_penalty=duplicate_penalty,
+                query=q,
+                context_hint=item.get("source_context"),
+            )
             payload = {
                 "id": item_id,
                 "url": item.get("url"),
@@ -124,6 +130,7 @@ class Searcher:
                     "penalties": explain_ranking_penalties(factors),
                     "archival_decision": explain_archival_decision(item),
                     "confidence_reduction": explain_confidence_reduction(item),
+                    "retrieval_trace": factors,
                 }
             merged.append(payload)
             if len(merged) >= max(limit * 3, limit):
