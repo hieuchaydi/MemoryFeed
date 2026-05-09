@@ -21,7 +21,7 @@ export type DocsSection = {
 export const hero = {
   title: "MemoryFeed Docs",
   description:
-    "Tài liệu độc lập cho MemoryFeed production: local-first social memory, lifecycle engine, namespace isolation, encryption mode, MCP, API, CLI, extension và vận hành.",
+    "Tài liệu production-ready cho MemoryFeed: local-first memory, lifecycle engine, namespace isolation, at-rest encryption, MCP integration, extension hardening, observability và release runbook.",
   badges: ["Local-first", "Lifecycle", "Namespace Isolation", "Encryption Ready", "MCP Ready"],
 };
 
@@ -34,8 +34,10 @@ export const navItems = [
   { id: "cli", label: "CLI" },
   { id: "mcp", label: "MCP" },
   { id: "extension", label: "Extension" },
+  { id: "extension-hardening", label: "Ext Hardening" },
   { id: "storage", label: "Storage" },
   { id: "ops", label: "Ops" },
+  { id: "observability", label: "Observability" },
   { id: "security", label: "Security" },
   { id: "testing", label: "Testing" },
   { id: "release", label: "Release" },
@@ -159,6 +161,27 @@ export const sections: DocsSection[] = [
     ],
   },
   {
+    id: "extension-hardening",
+    title: "Extension Hardening",
+    kicker: "Capture cần chịu được DOM drift và thay đổi UI liên tục từ social platforms.",
+    body: [
+      "Selector system dùng declarative JSON per-platform với fallback selectors, extractor_version và replay_source để trace.",
+      "Khi selector chính fail, extension tự rơi xuống fallback path và gắn quality_flags + confidence_reasons để backend đánh giá độ tin cậy.",
+      "Fixture replay nên chạy định kỳ để phát hiện drift trước khi production capture bị giảm chất lượng.",
+    ],
+    commands: [
+      { title: "Selector registry", code: "extension/selectors/*.json\nextension/chrome/selectors/*.json\nextension/firefox/selectors/*.json" },
+      { title: "Replay tool", code: "python tools/replay_selectors.py --platform twitter --fixture tests/fixtures/twitter/twitter_happy.html" },
+      { title: "Debug endpoint", code: "GET /api/debug/capture/latest\nGET /api/debug/item/{item_id}" },
+    ],
+    checklist: [
+      "Mỗi platform có candidate + text/author/url/media selectors.",
+      "Có fallback selector rõ ràng cho meta/link/title.",
+      "Theo dõi capture_confidence theo platform mỗi release.",
+      "Có fixture missing_author/missing_media cho regression.",
+    ],
+  },
+  {
     id: "storage",
     title: "Storage, logging và privacy",
     kicker: "Mặc định mọi dữ liệu user ở local machine.",
@@ -197,6 +220,27 @@ export const sections: DocsSection[] = [
       "Theo dõi queue backlog và dead-letter tăng bất thường.",
       "Kiểm tra provider circuit breaker nếu Gemini/Groq lỗi liên tục.",
       "Bật MEMORYFEED_LOG_FORMAT=json trong production để ingest vào log pipeline.",
+    ],
+  },
+  {
+    id: "observability",
+    title: "Observability và SLO",
+    kicker: "Đo được health và degradation trước khi user thấy lỗi.",
+    body: [
+      "Bật JSON logging trong production để mọi request có request_id, method, path, status_code, duration_ms.",
+      "Dùng /metrics để scrape queue depth và dead letters; dùng /readyz để kiểm tra service readiness trước traffic.",
+      "Khuyến nghị đặt SLO cho capture success rate, queue latency, và dead-letter growth rate theo 24h window.",
+    ],
+    commands: [
+      { title: "Log format", code: "MEMORYFEED_LOG_FORMAT=json\nMEMORYFEED_LOG_LEVEL=INFO" },
+      { title: "Health", code: "GET /healthz\nGET /readyz" },
+      { title: "Metrics", code: "GET /metrics\nGET /api/perf\nGET /api/queues/status" },
+    ],
+    checklist: [
+      "Alert nếu queue_size tăng liên tục > 15 phút.",
+      "Alert nếu dead_letters tăng đột biến theo queue.",
+      "Alert nếu ready=false hoặc provider breaker open liên tục.",
+      "Lưu log retention tối thiểu 14 ngày cho forensic.",
     ],
   },
   {
@@ -258,6 +302,7 @@ export const sections: DocsSection[] = [
       "Có PRODUCTION.md, MONITORING.md, BACKUP_STRATEGY.md cập nhật cùng release.",
       "Có changelog rõ breaking/non-breaking.",
       "Có rollback drill trước khi mở public mode.",
+      "Có go-live checklist ký duyệt: Security + QA + Ops.",
     ],
   },
   {

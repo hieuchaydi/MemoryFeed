@@ -31,7 +31,7 @@ const enContent: DocsContent = {
   hero: {
     title: "MemoryFeed Docs",
     description:
-      "Standalone production documentation for MemoryFeed: local-first memory, lifecycle engine, namespace isolation, encryption modes, MCP, API, CLI, extension, and operations.",
+      "Production-ready documentation for MemoryFeed: local-first memory, lifecycle engine, namespace isolation, at-rest encryption, MCP integration, extension hardening, observability, and release runbooks.",
     badges: ["Local-first", "Lifecycle", "Namespace Isolation", "Encryption Ready", "MCP Ready"],
   },
   navItems: [
@@ -43,8 +43,10 @@ const enContent: DocsContent = {
     { id: "cli", label: "CLI" },
     { id: "mcp", label: "MCP" },
     { id: "extension", label: "Extension" },
+    { id: "extension-hardening", label: "Ext Hardening" },
     { id: "storage", label: "Storage" },
     { id: "ops", label: "Ops" },
+    { id: "observability", label: "Observability" },
     { id: "security", label: "Security" },
     { id: "testing", label: "Testing" },
     { id: "release", label: "Release" },
@@ -167,6 +169,27 @@ const enContent: DocsContent = {
       ],
     },
     {
+      id: "extension-hardening",
+      title: "Extension Hardening",
+      kicker: "Capture must tolerate DOM drift and frequent social UI changes.",
+      body: [
+        "Selector extraction is declarative JSON per platform, including fallback selectors and extractor_version for traceability.",
+        "When primary selectors fail, extension falls back and emits quality_flags plus confidence_reasons so backend can score reliability.",
+        "Fixture replay should run regularly to detect drift before production quality drops.",
+      ],
+      commands: [
+        { title: "Selector registry", code: "extension/selectors/*.json\nextension/chrome/selectors/*.json\nextension/firefox/selectors/*.json" },
+        { title: "Replay tool", code: "python tools/replay_selectors.py --platform twitter --fixture tests/fixtures/twitter/twitter_happy.html" },
+        { title: "Debug endpoint", code: "GET /api/debug/capture/latest\nGET /api/debug/item/{item_id}" },
+      ],
+      checklist: [
+        "Each platform has candidate + text/author/url/media selectors.",
+        "Fallback selectors are defined for meta/link/title paths.",
+        "Track capture_confidence per platform for every release.",
+        "Keep missing_author and missing_media fixtures in regression suite.",
+      ],
+    },
+    {
       id: "storage",
       title: "Storage, Logging, and Privacy",
       kicker: "By default all user data stays on local machine.",
@@ -205,6 +228,27 @@ const enContent: DocsContent = {
         "Track queue backlog and dead-letter growth anomalies.",
         "Check provider circuit breaker state when Gemini/Groq fail repeatedly.",
         "Use MEMORYFEED_LOG_FORMAT=json in production for log pipeline ingestion.",
+      ],
+    },
+    {
+      id: "observability",
+      title: "Observability and SLO",
+      kicker: "Measure degradation before users feel impact.",
+      body: [
+        "Enable JSON logging in production so each request has request_id, method, path, status_code, and duration_ms.",
+        "Use /metrics for queue and dead-letter scraping, and /readyz for traffic readiness checks.",
+        "Define SLOs for capture success rate, queue latency, and dead-letter growth over 24-hour windows.",
+      ],
+      commands: [
+        { title: "Log format", code: "MEMORYFEED_LOG_FORMAT=json\nMEMORYFEED_LOG_LEVEL=INFO" },
+        { title: "Health", code: "GET /healthz\nGET /readyz" },
+        { title: "Metrics", code: "GET /metrics\nGET /api/perf\nGET /api/queues/status" },
+      ],
+      checklist: [
+        "Alert if queue_size keeps rising for more than 15 minutes.",
+        "Alert on abnormal dead-letter growth per queue.",
+        "Alert when ready=false or provider breakers remain open.",
+        "Keep at least 14 days of logs for incident review.",
       ],
     },
     {
@@ -266,6 +310,7 @@ const enContent: DocsContent = {
         "Keep PRODUCTION.md, MONITORING.md, BACKUP_STRATEGY.md updated with every release.",
         "Publish clear changelog with breaking/non-breaking notes.",
         "Run rollback drill before enabling public mode.",
+        "Require signed go-live checklist from Security + QA + Ops.",
       ],
     },
     {
