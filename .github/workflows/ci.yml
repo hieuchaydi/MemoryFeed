@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  python-quality:
+    name: Python Compile + Unit Tests
+    runs-on: ubuntu-latest
+    env:
+      OFFLINE_ONLY: "1"
+      MEMORYFEED_AI_PROVIDER: "none"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Compile Check
+        run: python -m compileall backend memoryfeed tests
+
+      - name: Unit Tests
+        run: python -m unittest discover -s tests -v
+
+  extension-syntax:
+    name: Extension JS Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate Extension JS
+        run: |
+          node --check extension/chrome/content.js
+          node --check extension/chrome/background.js
+          node --check extension/firefox/content.js
+          node --check extension/firefox/background.js
