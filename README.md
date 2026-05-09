@@ -1,4 +1,8 @@
 # MemoryFeed
+[![CI](https://github.com/hieuchaydi/MemoryFeed/actions/workflows/ci.yml/badge.svg)](https://github.com/hieuchaydi/MemoryFeed/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](memoryfeed/__version__.py)
+[![License](https://img.shields.io/badge/license-not_specified-lightgrey.svg)](pyproject.toml)
+[![Security Policy](https://img.shields.io/badge/security-policy-brightgreen.svg)](SECURITY.md)
 
 ![MemoryFeed Logo](frontend/public/logo-memoryfeed.svg)
 
