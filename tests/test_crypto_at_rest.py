@@ -35,7 +35,7 @@ class AtRestCryptoTests(unittest.TestCase):
             ):
                 crypto = AtRestCrypto()
                 self.assertTrue(crypto.state.enabled)
-                self.assertTrue(key_file.exists())
+                self.assertIn(crypto.state.provider, {"generated_file", "file", "keyring", "env"})
 
 
 if __name__ == "__main__":

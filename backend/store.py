@@ -15,6 +15,7 @@ from typing import Any
 
 from backend.memory_graph import derive_graph_fields
 from backend.noise import classify_noise
+from backend.crypto_at_rest import AtRestCrypto
 from backend.retention import compute_decay
 from backend.runtime_config import load_runtime_config
 from backend.safety import assess_prompt_risk, classify_sensitivity
@@ -36,12 +37,24 @@ class Store:
         IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         IMAGE_ENCRYPTED_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._crypto = AtRestCrypto()
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _maybe_encrypt_text(self, value: Any, aad: bytes) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        if not self._crypto.enabled:
+            return text
+        try:
+            return self._crypto.encrypt_text(text, aad=aad)
+        except Exception:
+            return text
 
     def _init_db(self) -> None:
         with self._lock:
@@ -76,6 +89,19 @@ class Store:
                     CREATE TABLE IF NOT EXISTS meta (
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
+                    );
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS job_dead_letters (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        queue_name TEXT NOT NULL,
+                        item_id TEXT,
+                        attempt INTEGER DEFAULT 1,
+                        error TEXT,
+                        payload TEXT,
+                        created_at TEXT NOT NULL
                     );
                     """
                 )
@@ -175,6 +201,8 @@ class Store:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_search_hidden ON items(search_hidden);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_index_dirty ON items(index_dirty);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_namespace ON items(namespace);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_dead_letters_queue ON job_dead_letters(queue_name);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_dead_letters_created_at ON job_dead_letters(created_at);")
                 conn.commit()
             finally:
                 conn.close()
@@ -243,7 +271,7 @@ class Store:
                         item["dedupe_key"],
                         json.dumps(item.get("image_cache_paths", []), ensure_ascii=False),
                         int(bool(item.get("starred", 0))),
-                        item.get("note"),
+                        self._maybe_encrypt_text(item.get("note"), aad=b"memoryfeed:note"),
                         json.dumps(item.get("tags", []), ensure_ascii=False),
                         float(item.get("heat", 1.0)),
                         item.get("last_surfaced"),
@@ -255,9 +283,9 @@ class Store:
                         item.get("author_name"),
                         item.get("author_handle"),
                         item.get("thumbnail_url"),
-                        item.get("source_context"),
+                        self._maybe_encrypt_text(item.get("source_context"), aad=b"memoryfeed:source_context"),
                         json.dumps(item.get("quality_flags", []), ensure_ascii=False),
-                        json.dumps(item.get("capture_debug", {}), ensure_ascii=False),
+                        self._maybe_encrypt_text(json.dumps(item.get("capture_debug", {}), ensure_ascii=False), aad=b"memoryfeed:capture_debug"),
                         float(item.get("capture_confidence", 1.0)),
                         float(item.get("noise_score", 0.0)),
                         item.get("low_signal_reason"),
@@ -465,7 +493,7 @@ class Store:
             params.append(1 if starred else 0)
         if note is not None:
             updates.append("note = ?")
-            params.append(note)
+            params.append(self._maybe_encrypt_text(note, aad=b"memoryfeed:note"))
         if tags is not None:
             updates.append("tags = ?")
             params.append(json.dumps(tags, ensure_ascii=False))
@@ -863,7 +891,11 @@ class Store:
             if key in {"image_urls", "image_captions", "image_cache_paths", "media_urls", "tags", "quality_flags", "related_topics", "related_entities", "sensitivity_reasons"}:
                 normalized[key] = json.dumps(value or [], ensure_ascii=False)
             elif key in {"capture_debug"}:
-                normalized[key] = json.dumps(value or {}, ensure_ascii=False)
+                normalized[key] = self._maybe_encrypt_text(json.dumps(value or {}, ensure_ascii=False), aad=b"memoryfeed:capture_debug")
+            elif key in {"note"}:
+                normalized[key] = self._maybe_encrypt_text(value, aad=b"memoryfeed:note")
+            elif key in {"source_context"}:
+                normalized[key] = self._maybe_encrypt_text(value, aad=b"memoryfeed:source_context")
             else:
                 normalized[key] = value
         normalized["updated_at"] = now_iso()
@@ -948,12 +980,103 @@ class Store:
         with self._write_transaction() as conn:
             conn.execute("DELETE FROM items")
             conn.execute("DELETE FROM items_fts")
+            conn.execute("DELETE FROM job_dead_letters")
+
+    def push_dead_letter(
+        self,
+        queue_name: str,
+        item_id: str | None,
+        attempt: int,
+        error: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        with self._write_transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO job_dead_letters(queue_name, item_id, attempt, error, payload, created_at)
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    queue_name[:120],
+                    item_id,
+                    int(attempt),
+                    str(error)[:1000],
+                    json.dumps(payload or {}, ensure_ascii=False),
+                    now_iso(),
+                ),
+            )
+
+    def list_dead_letters(self, limit: int = 200) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, queue_name, item_id, attempt, error, payload, created_at
+                FROM job_dead_letters
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [
+                {
+                    "id": int(r["id"]),
+                    "queue_name": str(r["queue_name"]),
+                    "item_id": r["item_id"],
+                    "attempt": int(r["attempt"] or 0),
+                    "error": str(r["error"] or ""),
+                    "payload": _safe_json_dict(r["payload"]),
+                    "created_at": str(r["created_at"]),
+                }
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
+    def migrate_encrypt_sensitive_fields(self, limit: int = 2000) -> dict[str, int]:
+        if not self._crypto.enabled:
+            return {"processed": 0, "updated": 0}
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, note, source_context, capture_debug
+                FROM items
+                WHERE (
+                    (note IS NOT NULL AND note != '' AND note NOT LIKE 'enc:%')
+                    OR (source_context IS NOT NULL AND source_context != '' AND source_context NOT LIKE 'enc:%')
+                    OR (capture_debug IS NOT NULL AND capture_debug != '' AND capture_debug NOT LIKE 'enc:%')
+                )
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        finally:
+            conn.close()
+        updated = 0
+        for row in rows:
+            fields: dict[str, Any] = {}
+            if row["note"] and not str(row["note"]).startswith("enc:"):
+                fields["note"] = str(row["note"])
+            if row["source_context"] and not str(row["source_context"]).startswith("enc:"):
+                fields["source_context"] = str(row["source_context"])
+            if row["capture_debug"] and not str(row["capture_debug"]).startswith("enc:"):
+                try:
+                    fields["capture_debug"] = _safe_json_dict(str(row["capture_debug"]))
+                except Exception:
+                    fields["capture_debug"] = {"raw": str(row["capture_debug"])}
+            if fields:
+                self.update_integrity_fields(str(row["id"]), fields)
+                updated += 1
+        return {"processed": len(rows), "updated": updated}
 
     @staticmethod
     def _row_to_item(row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:
             return None
         capture_debug = _safe_json_dict(row["capture_debug"]) if "capture_debug" in row.keys() else {}
+        if "capture_debug" in row.keys() and isinstance(row["capture_debug"], str):
+            capture_debug = _safe_json_dict(_decrypt_row_text(row["capture_debug"], aad=b"memoryfeed:capture_debug"))
         importance_score, resurfacing_score, recency_score, recurrence_score = _compute_ranking_primitives(
             {
                 "captured_at": row["captured_at"] if "captured_at" in row.keys() else None,
@@ -985,11 +1108,19 @@ class Store:
             "canonical_url": row["canonical_url"] if "canonical_url" in row.keys() and row["canonical_url"] else row["url"],
             "post_id": row["post_id"] if "post_id" in row.keys() else None,
             "thumbnail_url": row["thumbnail_url"] if "thumbnail_url" in row.keys() else None,
-            "source_context": row["source_context"] if "source_context" in row.keys() else None,
+            "source_context": (
+                _decrypt_row_text(row["source_context"], aad=b"memoryfeed:source_context")
+                if "source_context" in row.keys() and row["source_context"] is not None
+                else None
+            ),
             "quality_flags": _safe_json_list(row["quality_flags"]) if "quality_flags" in row.keys() else [],
             "capture_debug": capture_debug,
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
-            "note": row["note"] if "note" in row.keys() else None,
+            "note": (
+                _decrypt_row_text(row["note"], aad=b"memoryfeed:note")
+                if "note" in row.keys() and row["note"] is not None
+                else None
+            ),
             "tags": _safe_json_list(row["tags"]) if "tags" in row.keys() else [],
             "heat": float(row["heat"]) if "heat" in row.keys() and row["heat"] is not None else 1.0,
             "last_surfaced": row["last_surfaced"] if "last_surfaced" in row.keys() else None,
@@ -1178,6 +1309,18 @@ def _safe_json_dict(raw: Any) -> dict[str, Any]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _decrypt_row_text(raw: Any, aad: bytes) -> str:
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        return str(raw)
+    crypto = AtRestCrypto()
+    try:
+        return crypto.decrypt_text(raw, aad=aad)
+    except Exception:
+        return raw
 
 
 def _capture_confidence(item: dict[str, Any]) -> float:

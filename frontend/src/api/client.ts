@@ -149,3 +149,27 @@ export function exportData(): Promise<ExportResponse> {
 export function resetData(): Promise<ResetResponse> {
   return apiFetch<ResetResponse>("/api/admin/reset?confirm=RESET", { method: "DELETE" });
 }
+
+export function fetchMemoryHeatmap(): Promise<any> {
+  return apiFetch<any>("/api/memory/visualization/heatmap");
+}
+
+export function fetchMemoryReinforcementGraph(): Promise<any> {
+  return apiFetch<any>("/api/memory/visualization/reinforcement-graph");
+}
+
+export function fetchMemoryAging(): Promise<any> {
+  return apiFetch<any>("/api/memory/visualization/aging");
+}
+
+export function fetchMemoryLifecycleTimeline(): Promise<any> {
+  return apiFetch<any>("/api/memory/lifecycle/timeline");
+}
+
+export function fetchReady(): Promise<any> {
+  return apiFetch<any>("/readyz");
+}
+
+export function fetchPerf(): Promise<any> {
+  return apiFetch<any>("/api/perf");
+}

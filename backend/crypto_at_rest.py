@@ -8,7 +8,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
-from backend.store import DATA_DIR
+DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"))).expanduser()
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,10 @@ class EncryptionState:
 
 class AtRestCrypto:
     def __init__(self) -> None:
-        self.enabled = (os.getenv("MEMORY_ENCRYPTION_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"})
+        self.mode = (os.getenv("MEMORY_ENCRYPTION_MODE", "").strip().lower() or "")
+        if self.mode not in {"off", "compat", "strict"}:
+            self.mode = "compat" if (os.getenv("MEMORY_ENCRYPTION_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}) else "off"
+        self.enabled = self.mode != "off"
         self._key: bytes | None = None
         self._provider = "disabled"
         if self.enabled:
@@ -42,6 +45,8 @@ class AtRestCrypto:
         if not self.enabled:
             return payload
         if not payload.startswith(b"MFENC1"):
+            if self.mode == "strict":
+                raise RuntimeError("plaintext payload blocked in strict encryption mode")
             return payload
         key = self._require_key()
         nonce = payload[6:18]
@@ -60,6 +65,25 @@ class AtRestCrypto:
         dec = self.decrypt_bytes(raw, aad=aad)
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(dec)
+
+    def encrypt_text(self, value: str, aad: bytes = b"memoryfeed:text") -> str:
+        raw = self.encrypt_bytes(value.encode("utf-8"), aad=aad)
+        if raw.startswith(b"MFENC1"):
+            return "enc:" + base64.urlsafe_b64encode(raw).decode("ascii")
+        return value
+
+    def decrypt_text(self, value: str, aad: bytes = b"memoryfeed:text") -> str:
+        if not self.enabled:
+            return value
+        if not isinstance(value, str):
+            return ""
+        if not value.startswith("enc:"):
+            if self.mode == "strict":
+                raise RuntimeError("plaintext text blocked in strict encryption mode")
+            return value
+        blob = base64.urlsafe_b64decode(value[4:].encode("ascii"))
+        plain = self.decrypt_bytes(blob, aad=aad)
+        return plain.decode("utf-8", errors="replace")
 
     def _require_key(self) -> bytes:
         if not self._key:

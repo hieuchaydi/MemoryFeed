@@ -4,15 +4,24 @@ const DATE_KEY = "memoryfeed_badge_date";
 const ext = typeof browser !== "undefined" ? browser : chrome;
 
 async function postCapture(payload) {
-  const res = await fetch(`${API_BASE}/capture`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    throw new Error(`Capture failed with ${res.status}`);
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}/capture`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        throw new Error(`Capture failed with ${res.status}`);
+      }
+      return res.json();
+    } catch (error) {
+      lastErr = error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2000, 250 * (2 ** (attempt - 1)))));
+    }
   }
-  return res.json();
+  throw lastErr || new Error("Capture failed");
 }
 
 function todayLocal() {

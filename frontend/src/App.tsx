@@ -48,6 +48,7 @@ export default function App() {
           <Tab to="/feed">{t.app.nav.feed}</Tab>
           <Tab to="/timeline">{t.app.nav.timeline}</Tab>
           <Tab to="/stats">{t.app.nav.stats}</Tab>
+          <Tab to="/ops">Ops</Tab>
         </nav>
         <div className="rail-note">
           <p>{t.app.stack}</p>

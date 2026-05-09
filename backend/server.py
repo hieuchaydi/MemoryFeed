@@ -454,7 +454,36 @@ async def perf_api() -> dict[str, Any]:
         "vision": vision.status(),
         "native": native_status(),
         "providers": provider_runtime_state(),
+        "dead_letters": await asyncio.to_thread(store.list_dead_letters, 200),
     }
+
+
+@app.get("/metrics")
+async def metrics_api() -> Response:
+    stats = await asyncio.to_thread(store.stats)
+    queues = {
+        "indexer": indexer.status(),
+        "vision": vision.status(),
+    }
+    dead_letters = await asyncio.to_thread(store.list_dead_letters, 1000)
+    queue_dead = {
+        "indexer": sum(1 for r in dead_letters if r.get("queue_name") == "indexer"),
+        "vision": sum(1 for r in dead_letters if r.get("queue_name") == "vision"),
+    }
+    lines = [
+        "# HELP memoryfeed_items_total Total items in current namespace",
+        "# TYPE memoryfeed_items_total gauge",
+        f"memoryfeed_items_total {int(stats.get('total') or 0)}",
+        "# HELP memoryfeed_queue_size Queue sizes",
+        "# TYPE memoryfeed_queue_size gauge",
+        f"memoryfeed_queue_size{{queue=\"indexer\"}} {int(queues['indexer'].get('queue_size') or 0)}",
+        f"memoryfeed_queue_size{{queue=\"vision\"}} {int(queues['vision'].get('queue_size') or 0)}",
+        "# HELP memoryfeed_queue_dead_letters Total dead letter items by queue",
+        "# TYPE memoryfeed_queue_dead_letters counter",
+        f"memoryfeed_queue_dead_letters{{queue=\"indexer\"}} {queue_dead['indexer']}",
+        f"memoryfeed_queue_dead_letters{{queue=\"vision\"}} {queue_dead['vision']}",
+    ]
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/debug/item/{item_id}")
@@ -551,6 +580,24 @@ async def import_data_api(payload: ImportPayload, _auth: None = Depends(require_
     }
     logger.info("admin import inserted=%s duplicates=%s", inserted, duplicates)
     return report
+
+
+@app.get("/api/admin/dead-letters")
+async def admin_dead_letters_api(
+    limit: int = Query(default=200, ge=1, le=5000),
+    _auth: None = Depends(require_sensitive_access),
+) -> dict[str, Any]:
+    rows = await asyncio.to_thread(store.list_dead_letters, limit)
+    return {"count": len(rows), "items": rows}
+
+
+@app.post("/api/admin/encryption/migrate")
+async def admin_encrypt_migrate_api(
+    limit: int = Query(default=2000, ge=1, le=10000),
+    _auth: None = Depends(require_sensitive_access),
+) -> dict[str, Any]:
+    report = await asyncio.to_thread(store.migrate_encrypt_sensitive_fields, limit)
+    return {"ok": True, **report}
 
 
 @app.delete("/api/admin/reset")

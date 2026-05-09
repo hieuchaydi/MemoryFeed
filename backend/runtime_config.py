@@ -44,6 +44,7 @@ class RuntimeConfig:
     api_rate_limit_enabled: bool
     api_rate_limit_requests: int
     api_rate_limit_window_seconds: int
+    encryption_mode: str
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -143,7 +144,16 @@ def load_runtime_config() -> RuntimeConfig:
         api_rate_limit_enabled=env_flag("MEMORY_API_RATE_LIMIT_ENABLED", default=True),
         api_rate_limit_requests=env_int("MEMORY_API_RATE_LIMIT_REQUESTS", default=120, min_value=10, max_value=5000),
         api_rate_limit_window_seconds=env_int("MEMORY_API_RATE_LIMIT_WINDOW_SECONDS", default=60, min_value=1, max_value=3600),
+        encryption_mode=_encryption_mode(),
     )
+
+
+def _encryption_mode() -> str:
+    raw = (os.getenv("MEMORY_ENCRYPTION_MODE", "").strip().lower() or "")
+    if raw in {"off", "compat", "strict"}:
+        return raw
+    enabled = env_flag("MEMORY_ENCRYPTION_ENABLED", default=False)
+    return "compat" if enabled else "off"
 
 
 def provider_enabled(provider: str, config: RuntimeConfig | None = None) -> bool:

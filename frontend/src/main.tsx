@@ -8,6 +8,7 @@ import FeedPage from "./pages/FeedPage";
 import SearchPage from "./pages/SearchPage";
 import TimelinePage from "./pages/TimelinePage";
 import StatsPage from "./pages/StatsPage";
+import MemoryOpsPage from "./pages/MemoryOpsPage";
 import { SettingsProvider } from "./settings";
 import "./index.css";
 
@@ -37,6 +38,7 @@ createRoot(rootElement).render(
               <Route path="feed" element={<FeedPage />} />
               <Route path="timeline" element={<TimelinePage />} />
               <Route path="stats" element={<StatsPage />} />
+              <Route path="ops" element={<MemoryOpsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

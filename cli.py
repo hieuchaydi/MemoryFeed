@@ -491,6 +491,24 @@ def build_frontend() -> None:
         sys.exit(exc.returncode)
 
 
+@cli.command("encrypt-migrate")
+@click.option("--limit", default=2000, show_default=True, type=int)
+def encrypt_migrate(limit: int) -> None:
+    """Migrate legacy plaintext sensitive fields to encrypted form."""
+    store = _open_store_or_exit()
+    report = store.migrate_encrypt_sensitive_fields(limit=limit)
+    console.print_json(json.dumps(report, ensure_ascii=False))
+
+
+@cli.command("dead-letters")
+@click.option("--limit", default=100, show_default=True, type=int)
+def dead_letters(limit: int) -> None:
+    """Inspect persistent dead-letter queue records."""
+    store = _open_store_or_exit()
+    rows = store.list_dead_letters(limit=limit)
+    console.print_json(json.dumps({"count": len(rows), "items": rows}, ensure_ascii=False))
+
+
 @cli.command("benchmark-suite")
 @click.option("--limit", default=10, show_default=True, type=int)
 @click.option("--iterations", default=1, show_default=True, type=int)

@@ -85,6 +85,14 @@ class VisionService:
                 else:
                     self._dead_letter += 1
                     self._attempts.pop(item_id, None)
+                    await asyncio.to_thread(
+                        self.store.push_dead_letter,
+                        "vision",
+                        item_id,
+                        attempt,
+                        str(exc),
+                        {"stage": "vision_process"},
+                    )
                     logger.exception("vision_dead_letter item_id=%s attempts=%s error=%s", item_id, attempt, exc)
             finally:
                 self.queue.task_done()

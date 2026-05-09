@@ -37,6 +37,14 @@ jobs:
       - name: Unit Tests
         run: python -m unittest discover -s tests -v
 
+      - name: Selector Fixture Replay
+        run: python tools/replay_selectors.py
+
+      - name: Research Benchmark Smoke
+        run: |
+          python cli.py benchmark-suite --limit 5 --iterations 1
+          python -c "from pathlib import Path; p=Path('backend/benchmarks/runs'); assert p.exists() and any(p.glob('research-eval-*.json'))"
+
   extension-syntax:
     name: Extension JS Syntax
     runs-on: ubuntu-latest

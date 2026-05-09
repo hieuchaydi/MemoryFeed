@@ -67,6 +67,9 @@ MEMORYFEED_AI_PROVIDER=none
 - Docker runbook: `docs/DOCKER_README.md`
 - Research eval suite: `docs/RESEARCH_EVALUATION_SUITE.md`
 - Production roadmap v1.1.0: `docs/ROADMAP_V1_1_0_PRODUCTION.md`
+- Production runbook: `PRODUCTION.md`
+- Monitoring runbook: `MONITORING.md`
+- Backup strategy: `BACKUP_STRATEGY.md`
 
 ## Requirements
 
@@ -233,6 +236,7 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `GET /api/queues/status`
 - `GET /api/perf`
 - `GET /readyz`
+- `GET /metrics`
 - `GET /api/images/{name}` (encrypted image proxy when at-rest encryption is enabled)
 - `GET /api/debug/item/{id}`
 - `GET /api/memory/lifecycle/timeline`
@@ -248,6 +252,8 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `PATCH /api/items/{id}`
 - `POST /api/admin/export`
 - `POST /api/admin/import`
+- `GET /api/admin/dead-letters`
+- `POST /api/admin/encryption/migrate`
 - `DELETE /api/admin/reset?confirm=RESET`
 - `GET /healthz`
 
@@ -275,6 +281,8 @@ memoryfeed import --file ~/.memoryfeed/exports/memoryfeed-export-YYYY-MM-DD.json
 memoryfeed models
 memoryfeed build-native
 memoryfeed build-frontend
+memoryfeed encrypt-migrate --limit 2000
+memoryfeed dead-letters --limit 100
 memoryfeed reset
 ```
 
@@ -327,6 +335,7 @@ Search/reliability controls:
 - `MEMORY_API_RATE_LIMIT_REQUESTS=120`
 - `MEMORY_API_RATE_LIMIT_WINDOW_SECONDS=60`
 - `MEMORY_ENCRYPTION_ENABLED=1|0`
+- `MEMORY_ENCRYPTION_MODE=off|compat|strict`
 - `MEMORY_ENCRYPTION_KEY=<base64url-32-byte-key>` (optional override)
 - `MEMORY_ENCRYPTION_KEY_FILE=~/.memoryfeed/keys/master.key`
 
