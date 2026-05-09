@@ -3,48 +3,37 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.store import Store
+SCHEMA_VERSION = "2"
 
 
-def build_export_payload(store: Store) -> dict[str, Any]:
-    items = store.export_items()
+def export_payload(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "schema_version": store.schema_version(),
+        "schema_version": SCHEMA_VERSION,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "items": items,
     }
 
 
-def _read_items(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [row for row in payload if isinstance(row, dict)]
-    if not isinstance(payload, dict):
-        return []
-    rows = payload.get("items")
-    if not isinstance(rows, list):
-        return []
-    return [row for row in rows if isinstance(row, dict)]
+def import_payload(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    warnings: list[str] = []
+    version = str(payload.get("schema_version") or "1")
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        warnings.append("invalid_items_payload")
+        return [], warnings
 
-
-def import_payload(store: Store, payload: dict[str, Any] | list[Any]) -> dict[str, Any]:
-    inserted = 0
-    duplicates = 0
-    invalid = 0
-    inserted_ids: list[str] = []
-    for item in _read_items(payload):
-        if not item.get("url"):
-            invalid += 1
+    normalized: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            warnings.append(f"skipped_non_object_item:{idx}")
             continue
-        ok, item_id = store.insert_item(item)
-        if ok:
-            inserted += 1
-            if item_id:
-                inserted_ids.append(str(item_id))
-        else:
-            duplicates += 1
-    return {
-        "inserted": inserted,
-        "duplicates": duplicates,
-        "invalid": invalid,
-        "inserted_ids": inserted_ids,
-    }
+        if not item.get("url"):
+            warnings.append(f"skipped_missing_url:{idx}")
+            continue
+        if version == "1" and not item.get("canonical_url"):
+            item = dict(item)
+            item["canonical_url"] = item.get("url")
+        normalized.append(item)
+    if version not in {"1", SCHEMA_VERSION}:
+        warnings.append(f"unknown_schema_version:{version}")
+    return normalized, warnings

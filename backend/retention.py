@@ -1,56 +1,45 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Any
+import math
+from datetime import datetime, timezone
 
 
-def run_retention_policy(
-    conn,
-    retention_days: int,
-    low_score_threshold: float,
-    auto_archive: bool = True,
-) -> dict[str, Any]:
-    if retention_days <= 0:
-        return {"evaluated": 0, "archived": 0}
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
-    rows = conn.execute(
-        """
-        SELECT id, captured_at, archived_at, importance_score, recency_score, starred
-        FROM items
-        WHERE captured_at <= ?
-        """,
-        (cutoff.isoformat(),),
-    ).fetchall()
 
-    evaluated = len(rows)
-    if not auto_archive:
-        return {"evaluated": evaluated, "archived": 0}
+def compute_decay(
+    item: dict,
+    half_life_days: int = 90,
+    now: datetime | None = None,
+) -> tuple[float, str]:
+    now_dt = now or datetime.now(timezone.utc)
+    captured = _parse_iso(str(item.get("captured_at") or "")) or now_dt
+    age_days = max(0.0, (now_dt - captured).total_seconds() / 86400.0)
 
-    archived = 0
-    now_iso = datetime.now(timezone.utc).isoformat()
-    for row in rows:
-        if row["archived_at"]:
-            continue
-        if bool(row["starred"]):
-            continue
-        importance = float(row["importance_score"] or 0.0)
-        recency = float(row["recency_score"] or 0.0)
-        if importance > low_score_threshold:
-            continue
-        if recency > 0.25:
-            continue
-        conn.execute(
-            """
-            UPDATE items
-            SET archived_at = ?, archive_reason = ?
-            WHERE id = ? AND archived_at IS NULL
-            """,
-            (
-                now_iso,
-                f"retention:age>{retention_days}d,importance<={low_score_threshold:.2f}",
-                row["id"],
-            ),
-        )
-        archived += 1
-    return {"evaluated": evaluated, "archived": archived}
+    surfaced_count = int(item.get("surfaced_count") or 0)
+    starred = bool(item.get("starred"))
+    important = float(item.get("heat") or 1.0) >= 2.5 or starred
+
+    adjustment = 1.0 + min(1.5, surfaced_count * 0.06)
+    if important:
+        adjustment += 0.7
+    adjusted_half_life = max(7.0, float(half_life_days) * adjustment)
+
+    decay_score = 1.0 - math.exp(-math.log(2.0) * (age_days / adjusted_half_life))
+    decay_score = max(0.0, min(1.0, decay_score))
+
+    if item.get("archived_at"):
+        state = "archived"
+    elif decay_score >= 0.85:
+        state = "stale"
+    elif decay_score >= 0.45:
+        state = "cooling"
+    else:
+        state = "active"
+    return float(round(decay_score, 6)), state

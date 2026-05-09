@@ -73,6 +73,7 @@ class IndexerService:
             return
         self._running = True
         self._worker_task = asyncio.create_task(self._worker(), name="memoryfeed-indexer")
+        await self._enqueue_dirty_items()
         logger.info("indexer_started")
 
     async def stop(self) -> None:
@@ -105,6 +106,9 @@ class IndexerService:
     async def index_item(self, item_id: str) -> None:
         item = await asyncio.to_thread(self.store.get_item, item_id)
         if not item:
+            return
+        if bool(item.get("embedding_skipped")):
+            await asyncio.to_thread(self.store.mark_embedding_done, item_id)
             return
 
         combined = build_semantic_text(item)
@@ -150,6 +154,11 @@ class IndexerService:
             item_id=item_id,
             suspicious_prompt_content=bool(item.get("suspicious_prompt_content", False)),
         )
+
+    async def _enqueue_dirty_items(self, limit: int = 500) -> None:
+        dirty_rows = await asyncio.to_thread(self.store.list_dirty_items, limit)
+        for row in dirty_rows:
+            await self.enqueue(str(row.get("id")))
 
     async def semantic_search(self, query: str, limit: int = 20) -> list[SemanticHit]:
         if not query.strip():

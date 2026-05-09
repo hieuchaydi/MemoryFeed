@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 
 VALID_AI_PROVIDERS = {"none", "gemini", "groq", "auto"}
-LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testclient"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 @dataclass(frozen=True)
@@ -18,15 +17,14 @@ class RuntimeConfig:
     mcp_allow_timeline: bool
     mcp_allow_active_feed: bool
     mcp_redact_output: bool
-    memory_semantic_dedupe: bool
-    memory_dedupe_similarity_threshold: float
-    memory_dedupe_window_hours: int
-    memory_platform_dedupe_windows: dict[str, int]
-    memory_sanitize_prompt_content: bool
-    memory_skip_sensitive_embedding: bool
-    memory_retention_days: int
-    memory_auto_archive: bool
-    memory_archive_low_score_threshold: float
+    search_diversity: bool
+    search_diversity_factor: float
+    enable_decay: bool
+    decay_half_life_days: int
+    hide_sensitive_from_search: bool
+    skip_sensitive_embedding: bool
+    background_maintenance: bool
+    maintenance_interval_seconds: int
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -49,7 +47,7 @@ def env_int(name: str, default: int, min_value: int = 1, max_value: int | None =
     return parsed
 
 
-def env_float(name: str, default: float, min_value: float = 0.0, max_value: float | None = None) -> float:
+def env_float(name: str, default: float, min_value: float = 0.0, max_value: float = 1.0) -> float:
     raw = os.getenv(name, str(default)).strip()
     try:
         parsed = float(raw)
@@ -57,37 +55,9 @@ def env_float(name: str, default: float, min_value: float = 0.0, max_value: floa
         parsed = default
     if parsed < min_value:
         parsed = min_value
-    if max_value is not None and parsed > max_value:
+    if parsed > max_value:
         parsed = max_value
     return parsed
-
-
-def env_json_int_map(
-    name: str,
-    *,
-    min_value: int = 1,
-    max_value: int = 24 * 30,
-) -> dict[str, int]:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    out: dict[str, int] = {}
-    for key, value in parsed.items():
-        if not isinstance(key, str):
-            continue
-        try:
-            hours = int(value)
-        except Exception:
-            continue
-        hours = max(min_value, min(max_value, hours))
-        out[key.strip().lower()] = hours
-    return out
 
 
 def load_runtime_config() -> RuntimeConfig:
@@ -107,25 +77,14 @@ def load_runtime_config() -> RuntimeConfig:
         mcp_allow_timeline=env_flag("MEMORYFEED_MCP_ALLOW_TIMELINE", default=False),
         mcp_allow_active_feed=env_flag("MEMORYFEED_MCP_ALLOW_ACTIVE_FEED", default=True),
         mcp_redact_output=env_flag("MEMORYFEED_MCP_REDACT_OUTPUT", default=True),
-        memory_semantic_dedupe=env_flag("MEMORY_SEMANTIC_DEDUPE", default=True),
-        memory_dedupe_similarity_threshold=env_float(
-            "MEMORY_DEDUPE_SIMILARITY_THRESHOLD",
-            default=0.92,
-            min_value=0.5,
-            max_value=0.999,
-        ),
-        memory_dedupe_window_hours=env_int("MEMORY_DEDUPE_WINDOW_HOURS", default=2, min_value=1, max_value=24 * 30),
-        memory_platform_dedupe_windows=env_json_int_map("MEMORY_PLATFORM_DEDUPE_WINDOWS"),
-        memory_sanitize_prompt_content=env_flag("MEMORY_SANITIZE_PROMPT_CONTENT", default=True),
-        memory_skip_sensitive_embedding=env_flag("MEMORY_SKIP_SENSITIVE_EMBEDDING", default=True),
-        memory_retention_days=env_int("MEMORY_RETENTION_DAYS", default=365, min_value=7, max_value=36500),
-        memory_auto_archive=env_flag("MEMORY_AUTO_ARCHIVE", default=True),
-        memory_archive_low_score_threshold=env_float(
-            "MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD",
-            default=0.35,
-            min_value=0.0,
-            max_value=1.0,
-        ),
+        search_diversity=env_flag("MEMORY_SEARCH_DIVERSITY", default=True),
+        search_diversity_factor=env_float("MEMORY_SEARCH_DIVERSITY_FACTOR", default=0.3, min_value=0.0, max_value=1.0),
+        enable_decay=env_flag("MEMORY_ENABLE_DECAY", default=True),
+        decay_half_life_days=env_int("MEMORY_DECAY_HALF_LIFE_DAYS", default=90, min_value=7, max_value=3650),
+        hide_sensitive_from_search=env_flag("MEMORY_HIDE_SENSITIVE_FROM_SEARCH", default=True),
+        skip_sensitive_embedding=env_flag("MEMORY_SKIP_SENSITIVE_EMBEDDING", default=True),
+        background_maintenance=env_flag("MEMORY_BACKGROUND_MAINTENANCE", default=True),
+        maintenance_interval_seconds=env_int("MEMORY_MAINTENANCE_INTERVAL_SECONDS", default=600, min_value=60, max_value=86400),
     )
 
 
@@ -160,11 +119,3 @@ def is_localhost_client(client_host: str | None) -> bool:
         return False
     normalized = client_host.split(",", 1)[0].strip().lower()
     return normalized in LOOPBACK_HOSTS
-
-
-def dedupe_window_hours_for_platform(platform: str | None, config: RuntimeConfig | None = None) -> int:
-    cfg = config or load_runtime_config()
-    key = (platform or "").strip().lower()
-    if key and key in cfg.memory_platform_dedupe_windows:
-        return int(cfg.memory_platform_dedupe_windows[key])
-    return int(cfg.memory_dedupe_window_hours)

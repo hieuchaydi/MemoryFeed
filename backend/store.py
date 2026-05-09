@@ -4,28 +4,18 @@ import json
 import sqlite3
 import threading
 import hashlib
+import math
 import os
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.dedupe import dedupe_bucket, find_semantic_duplicate
-from backend.feed import score_item
-from backend.memory_graph import (
-    cluster_id_for_item,
-    extract_entities,
-    extract_topics,
-    infer_memory_relationships,
-    infer_url_domain,
-    persist_relationships,
-    semantic_group_for_item,
-)
-from backend.migrate import run_migrations_on_connection
-from backend.ranking import update_item_scores
-from backend.retention import run_retention_policy
+from backend.memory_graph import derive_graph_fields
+from backend.noise import classify_noise
+from backend.retention import compute_decay
 from backend.runtime_config import load_runtime_config
-from backend.safety import detect_prompt_injection
-from backend.url_normalization import canonicalize_url, extract_post_id
+from backend.safety import assess_prompt_risk, classify_sensitivity
 
 DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"))).expanduser()
 DB_PATH = DATA_DIR / "memoryfeed.db"
@@ -142,62 +132,28 @@ class Store:
                 self._ensure_column(conn, "items", "source_context", "TEXT")
                 self._ensure_column(conn, "items", "quality_flags", "TEXT")
                 self._ensure_column(conn, "items", "capture_debug", "TEXT")
-                self._ensure_column(conn, "items", "url_domain", "TEXT")
+                self._ensure_column(conn, "items", "capture_confidence", "REAL DEFAULT 1.0")
+                self._ensure_column(conn, "items", "noise_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "low_signal_reason", "TEXT")
+                self._ensure_column(conn, "items", "decay_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "aging_state", "TEXT DEFAULT 'active'")
                 self._ensure_column(conn, "items", "related_topics", "TEXT")
                 self._ensure_column(conn, "items", "related_entities", "TEXT")
-                self._ensure_column(conn, "items", "cluster_id", "TEXT")
                 self._ensure_column(conn, "items", "semantic_group", "TEXT")
-                self._ensure_column(conn, "items", "importance_score", "REAL DEFAULT 0.0")
-                self._ensure_column(conn, "items", "resurfacing_score", "REAL DEFAULT 0.0")
-                self._ensure_column(conn, "items", "recency_score", "REAL DEFAULT 0.0")
-                self._ensure_column(conn, "items", "recurrence_score", "REAL DEFAULT 0.0")
-                self._ensure_column(conn, "items", "ranking_debug", "TEXT")
-                self._ensure_column(conn, "items", "embedding_skipped_reason", "TEXT")
-                self._ensure_column(conn, "items", "suspicious_prompt_content", "INTEGER DEFAULT 0")
-                self._ensure_column(conn, "items", "safety_signals", "TEXT")
-                self._ensure_column(conn, "items", "archive_reason", "TEXT")
-                self._ensure_column(conn, "items", "capture_confidence", "REAL DEFAULT 0.0")
-                self._ensure_column(conn, "items", "confidence_reasons", "TEXT")
-                self._ensure_column(conn, "items", "capture_method", "TEXT")
-                self._ensure_column(conn, "items", "extractor_version", "TEXT")
-                self._ensure_column(conn, "items", "capture_source", "TEXT")
-                self._ensure_column(conn, "items", "replay_source", "TEXT")
+                self._ensure_column(conn, "items", "prompt_risk_score", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "prompt_risk_reason", "TEXT")
+                self._ensure_column(conn, "items", "sensitivity_level", "TEXT DEFAULT 'none'")
+                self._ensure_column(conn, "items", "sensitivity_reasons", "TEXT")
+                self._ensure_column(conn, "items", "embedding_skipped", "INTEGER DEFAULT 0")
+                self._ensure_column(conn, "items", "search_hidden", "INTEGER DEFAULT 0")
+                self._ensure_column(conn, "items", "index_dirty", "INTEGER DEFAULT 1")
+                self._ensure_column(conn, "items", "updated_at", "TEXT")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_heat ON items(heat);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_archived_at ON items(archived_at);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_canonical_url ON items(canonical_url);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_post_id ON items(post_id);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_url_domain ON items(url_domain);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_cluster_id ON items(cluster_id);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_semantic_group ON items(semantic_group);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_importance_score ON items(importance_score);")
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS memory_links (
-                        from_item_id TEXT NOT NULL,
-                        to_item_id TEXT NOT NULL,
-                        relation_type TEXT NOT NULL,
-                        weight REAL DEFAULT 0.0,
-                        reason TEXT,
-                        created_at TEXT NOT NULL,
-                        PRIMARY KEY (from_item_id, to_item_id, relation_type)
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS benchmark_runs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        version TEXT NOT NULL,
-                        platform TEXT NOT NULL,
-                        success_rate REAL DEFAULT 0.0,
-                        duplicate_rate REAL DEFAULT 0.0,
-                        missing_field_rate REAL DEFAULT 0.0,
-                        snapshot_json TEXT,
-                        created_at TEXT NOT NULL
-                    )
-                    """
-                )
-                run_migrations_on_connection(conn)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_search_hidden ON items(search_hidden);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_index_dirty ON items(index_dirty);")
                 conn.commit()
             finally:
                 conn.close()
@@ -209,44 +165,27 @@ class Store:
         if col_name not in names:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
 
-    def insert_item(self, item: dict[str, Any]) -> tuple[bool, str | None]:
-        item = self._normalize_item_for_insert(item)
+    @contextmanager
+    def _write_transaction(self):
         with self._lock:
             conn = self._connect()
             try:
-                cfg = load_runtime_config()
-                existing_fingerprint = conn.execute(
-                    "SELECT id FROM items WHERE dedupe_key = ? LIMIT 1",
-                    (item["dedupe_key"],),
-                ).fetchone()
-                if existing_fingerprint:
-                    conn.execute(
-                        """
-                        UPDATE items
-                        SET recurrence_score = MIN(1.0, COALESCE(recurrence_score, 0.0) + 0.02)
-                        WHERE id = ?
-                        """,
-                        (str(existing_fingerprint["id"]),),
-                    )
-                    conn.commit()
-                    return False, str(existing_fingerprint["id"])
+                conn.execute("BEGIN IMMEDIATE")
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
-                if cfg.memory_semantic_dedupe:
-                    match = find_semantic_duplicate(conn, item, threshold=cfg.memory_dedupe_similarity_threshold)
-                    if match:
-                        conn.execute(
-                            """
-                            UPDATE items
-                            SET recurrence_score = MIN(1.0, COALESCE(recurrence_score, 0.0) + 0.03),
-                                ranking_debug = COALESCE(ranking_debug, '{}')
-                            WHERE id = ?
-                            """,
-                            (match.duplicate_id,),
-                        )
-                        conn.commit()
-                        return False, match.duplicate_id
+    def insert_item(self, item: dict[str, Any]) -> tuple[bool, str | None]:
+        return self.insert_item_atomic(item, fail_after_write=False)
 
-                cur = conn.execute(
+    def insert_item_atomic(self, item: dict[str, Any], fail_after_write: bool = False) -> tuple[bool, str | None]:
+        item = self._normalize_item_for_insert(item)
+        with self._write_transaction() as conn:
+            cur = conn.execute(
                     """
                     INSERT OR IGNORE INTO items (
                         id, url, platform, content_type, text_content, image_urls,
@@ -254,13 +193,13 @@ class Store:
                         embedding_done, vision_done, dedupe_key, image_cache_paths,
                         starred, note, tags, heat, last_surfaced, surfaced_count, archived_at,
                         canonical_url, post_id, media_urls, author_name, author_handle,
-                        thumbnail_url, source_context, quality_flags, capture_debug, url_domain,
-                        related_topics, related_entities, cluster_id, semantic_group,
-                        importance_score, resurfacing_score, recency_score, recurrence_score,
-                        ranking_debug, embedding_skipped_reason, suspicious_prompt_content, safety_signals,
-                        archive_reason, capture_confidence, confidence_reasons, capture_method,
-                        extractor_version, capture_source, replay_source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        thumbnail_url, source_context, quality_flags, capture_debug, capture_confidence,
+                        noise_score, low_signal_reason, decay_score, aging_state,
+                        related_topics, related_entities, semantic_group,
+                        prompt_risk_score, prompt_risk_reason,
+                        sensitivity_level, sensitivity_reasons,
+                        embedding_skipped, search_hidden, index_dirty, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"],
@@ -293,55 +232,38 @@ class Store:
                         item.get("source_context"),
                         json.dumps(item.get("quality_flags", []), ensure_ascii=False),
                         json.dumps(item.get("capture_debug", {}), ensure_ascii=False),
-                        item.get("url_domain"),
+                        float(item.get("capture_confidence", 1.0)),
+                        float(item.get("noise_score", 0.0)),
+                        item.get("low_signal_reason"),
+                        float(item.get("decay_score", 0.0)),
+                        item.get("aging_state", "active"),
                         json.dumps(item.get("related_topics", []), ensure_ascii=False),
                         json.dumps(item.get("related_entities", []), ensure_ascii=False),
-                        item.get("cluster_id"),
                         item.get("semantic_group"),
-                        float(item.get("importance_score", 0.0) or 0.0),
-                        float(item.get("resurfacing_score", 0.0) or 0.0),
-                        float(item.get("recency_score", 0.0) or 0.0),
-                        float(item.get("recurrence_score", 0.0) or 0.0),
-                        json.dumps(item.get("ranking_debug", {}), ensure_ascii=False),
-                        item.get("embedding_skipped_reason"),
-                        int(bool(item.get("suspicious_prompt_content", False))),
-                        json.dumps(item.get("safety_signals", []), ensure_ascii=False),
-                        item.get("archive_reason"),
-                        float(item.get("capture_confidence", 0.0) or 0.0),
-                        json.dumps(item.get("confidence_reasons", []), ensure_ascii=False),
-                        item.get("capture_method"),
-                        item.get("extractor_version"),
-                        item.get("capture_source"),
-                        item.get("replay_source"),
+                        float(item.get("prompt_risk_score", 0.0)),
+                        item.get("prompt_risk_reason"),
+                        item.get("sensitivity_level", "none"),
+                        json.dumps(item.get("sensitivity_reasons", []), ensure_ascii=False),
+                        int(bool(item.get("embedding_skipped", 0))),
+                        int(bool(item.get("search_hidden", 0))),
+                        int(bool(item.get("index_dirty", 1))),
+                        item.get("updated_at", now_iso()),
                     ),
                 )
+            if fail_after_write:
+                raise RuntimeError("simulated_atomic_failure")
+            if cur.rowcount == 1:
+                return True, item["id"]
 
-                if cur.rowcount == 1:
-                    self._refresh_item_derived_fields(conn, item["id"], seed_item=item)
-                    self._run_retention_if_enabled(conn)
-                    conn.commit()
-                    return True, item["id"]
-
-                existing = conn.execute(
-                    "SELECT id FROM items WHERE dedupe_key = ? LIMIT 1", (item["dedupe_key"],)
-                ).fetchone()
-                if existing:
-                    conn.execute(
-                        """
-                        UPDATE items
-                        SET recurrence_score = MIN(1.0, COALESCE(recurrence_score, 0.0) + 0.02)
-                        WHERE id = ?
-                        """,
-                        (str(existing["id"]),),
-                    )
-                conn.commit()
-                return False, str(existing["id"]) if existing else None
-            finally:
-                conn.close()
+            existing = conn.execute(
+                "SELECT id FROM items WHERE dedupe_key = ? LIMIT 1", (item["dedupe_key"],)
+            ).fetchone()
+            return False, str(existing["id"]) if existing else None
 
     @staticmethod
     def _normalize_item_for_insert(item: dict[str, Any]) -> dict[str, Any]:
         out = dict(item)
+        cfg = load_runtime_config()
         out.setdefault("image_urls", [])
         out.setdefault("media_urls", out.get("image_urls", []))
         out.setdefault("image_captions", [])
@@ -355,7 +277,7 @@ class Store:
         out.setdefault("source_context", None)
         out.setdefault("quality_flags", [])
         out.setdefault("capture_debug", {})
-        out.setdefault("url_domain", infer_url_domain(out.get("canonical_url") or out.get("url")))
+        out.setdefault("capture_confidence", _capture_confidence(out))
         out.setdefault("dwell_seconds", 0.0)
         out.setdefault("embedding_done", 0)
         out.setdefault("vision_done", 1 if not out.get("image_urls") else 0)
@@ -366,166 +288,61 @@ class Store:
         out.setdefault("last_surfaced", None)
         out.setdefault("surfaced_count", 0)
         out.setdefault("archived_at", None)
-        out.setdefault("archive_reason", None)
         out.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
+        out.setdefault("updated_at", now_iso())
         out.setdefault("content_type", "post")
         out.setdefault("platform", "unknown")
         out.setdefault("text_content", "")
-        out.setdefault("related_topics", [])
-        out.setdefault("related_entities", [])
-        out.setdefault("cluster_id", None)
-        out.setdefault("semantic_group", None)
-        out.setdefault("importance_score", 0.0)
-        out.setdefault("resurfacing_score", 0.0)
-        out.setdefault("recency_score", 0.0)
-        out.setdefault("recurrence_score", 0.0)
-        out.setdefault("ranking_debug", {})
-        out.setdefault("embedding_skipped_reason", None)
-        out.setdefault("suspicious_prompt_content", False)
-        out.setdefault("safety_signals", [])
-
-        canonical = str(out.get("canonical_url") or out.get("url") or "").strip()
-        platform_name = str(out.get("platform") or "unknown")
-        if canonical:
-            out["canonical_url"] = canonicalize_url(canonical, platform=platform_name) or canonical
-        if not out.get("post_id"):
-            out["post_id"] = extract_post_id(str(out.get("canonical_url") or ""), platform=platform_name)
-        out.setdefault("capture_confidence", 0.0)
-        out.setdefault("confidence_reasons", [])
-        out.setdefault("capture_method", "import")
-        out.setdefault("extractor_version", "legacy")
-        out.setdefault("capture_source", "import")
-        out.setdefault("replay_source", None)
 
         if not out.get("dedupe_key"):
             canonical = out.get("canonical_url") or out.get("url") or ""
             author_name = out.get("author_name") or out.get("author") or ""
             captured_at = out.get("captured_at") or now_iso()
             try:
-                bucket = dedupe_bucket(str(captured_at), platform=str(out.get("platform") or "unknown"))
+                dt = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+                bucket = str(int(dt.timestamp() // (2 * 60 * 60)))
             except Exception:
                 bucket = str(captured_at)[:13]
             seed = f"{canonical}|{str(out.get('text_content', ''))[:240]}|{author_name[:100]}|{bucket}".encode(
                 "utf-8", errors="ignore"
             )
             out["dedupe_key"] = hashlib.sha256(seed).hexdigest()
+
+        noise_score, low_signal_reason = classify_noise(out)
+        out.setdefault("noise_score", noise_score)
+        out.setdefault("low_signal_reason", low_signal_reason)
+
+        related = derive_graph_fields(out)
+        out.setdefault("related_topics", related["related_topics"])
+        out.setdefault("related_entities", related["related_entities"])
+        out.setdefault("semantic_group", related["semantic_group"])
+
+        prompt_risk_score, prompt_risk_reason = assess_prompt_risk(
+            f"{out.get('text_content') or ''}\n{json.dumps(out.get('capture_debug') or {}, ensure_ascii=False)}"
+        )
+        out.setdefault("prompt_risk_score", prompt_risk_score)
+        out.setdefault("prompt_risk_reason", prompt_risk_reason)
+
+        sensitivity_level, sensitivity_reasons = classify_sensitivity(
+            str(out.get("text_content") or ""),
+            str(out.get("url") or ""),
+        )
+        out.setdefault("sensitivity_level", sensitivity_level)
+        out.setdefault("sensitivity_reasons", sensitivity_reasons)
+        skip_embedding = cfg.skip_sensitive_embedding and sensitivity_level == "high"
+        out.setdefault("embedding_skipped", 1 if skip_embedding else 0)
+        out.setdefault("search_hidden", 1 if (cfg.hide_sensitive_from_search and sensitivity_level == "high") else 0)
+        out.setdefault("index_dirty", 0 if skip_embedding else 1)
+
+        decay_score, aging_state = compute_decay(out, half_life_days=cfg.decay_half_life_days)
+        out.setdefault("decay_score", decay_score)
+        out.setdefault("aging_state", aging_state)
         return out
-
-    def _refresh_item_derived_fields(
-        self,
-        conn: sqlite3.Connection,
-        item_id: str,
-        seed_item: dict[str, Any] | None = None,
-    ) -> None:
-        item = dict(seed_item or {})
-        if not item:
-            row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-            parsed = self._row_to_item(row)
-            if not parsed:
-                return
-            item = parsed
-
-        text_blob = " \n ".join(
-            [
-                str(item.get("text_content") or ""),
-                " ".join(item.get("image_captions") or []),
-                str(item.get("note") or ""),
-            ]
-        ).strip()
-        topics = extract_topics(text_blob, tags=item.get("tags") or [])
-        entities = extract_entities(text_blob, author=item.get("author_name") or item.get("author"))
-        item["related_topics"] = topics
-        item["related_entities"] = entities
-        item["url_domain"] = infer_url_domain(item.get("canonical_url") or item.get("url"))
-        item["semantic_group"] = item.get("semantic_group") or semantic_group_for_item(item)
-        item["cluster_id"] = item.get("cluster_id") or cluster_id_for_item(item)
-
-        safety = detect_prompt_injection(text_blob)
-        item["suspicious_prompt_content"] = bool(safety["suspicious"])
-        item["safety_signals"] = list(safety["signals"])
-
-        relations, inferred_topics, inferred_entities = infer_memory_relationships(conn, item)
-        if inferred_topics:
-            item["related_topics"] = inferred_topics
-        if inferred_entities:
-            item["related_entities"] = inferred_entities
-        item["semantic_group"] = semantic_group_for_item(item)
-        item["cluster_id"] = cluster_id_for_item(item)
-
-        conn.execute(
-            """
-            UPDATE items
-            SET url_domain = ?,
-                related_topics = ?,
-                related_entities = ?,
-                cluster_id = ?,
-                semantic_group = ?,
-                suspicious_prompt_content = ?,
-                safety_signals = ?
-            WHERE id = ?
-            """,
-            (
-                item.get("url_domain"),
-                json.dumps(item.get("related_topics", []), ensure_ascii=False),
-                json.dumps(item.get("related_entities", []), ensure_ascii=False),
-                item.get("cluster_id"),
-                item.get("semantic_group"),
-                int(bool(item.get("suspicious_prompt_content"))),
-                json.dumps(item.get("safety_signals", []), ensure_ascii=False),
-                item_id,
-            ),
-        )
-        persist_relationships(conn, item_id, relations)
-
-        row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-        parsed = self._row_to_item(row)
-        if parsed:
-            update_item_scores(conn, item_id, parsed)
-
-    def _run_retention_if_enabled(self, conn: sqlite3.Connection) -> None:
-        cfg = load_runtime_config()
-        if not cfg.memory_auto_archive:
-            return
-        today = date.today().isoformat()
-        last_row = conn.execute("SELECT value FROM meta WHERE key = 'last_retention_run'").fetchone()
-        if last_row and str(last_row["value"]) == today:
-            return
-        report = run_retention_policy(
-            conn,
-            retention_days=cfg.memory_retention_days,
-            low_score_threshold=cfg.memory_archive_low_score_threshold,
-            auto_archive=cfg.memory_auto_archive,
-        )
-        conn.execute(
-            """
-            INSERT INTO meta(key, value)
-            VALUES('last_retention_run', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (today,),
-        )
-        if report.get("archived", 0):
-            conn.execute(
-                """
-                INSERT INTO meta(key, value)
-                VALUES('last_retention_archive_count', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (str(int(report["archived"])),),
-            )
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
         conn = self._connect()
         try:
             row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-            return self._row_to_item(row) if row else None
-        finally:
-            conn.close()
-
-    def latest_item(self) -> dict[str, Any] | None:
-        conn = self._connect()
-        try:
-            row = conn.execute("SELECT * FROM items ORDER BY captured_at DESC, rowid DESC LIMIT 1").fetchone()
             return self._row_to_item(row) if row else None
         finally:
             conn.close()
@@ -536,47 +353,23 @@ class Store:
         captions: list[str],
         cache_paths: list[str],
     ) -> None:
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute(
-                    """
-                    UPDATE items
-                    SET image_captions = ?, image_cache_paths = ?, vision_done = 1, embedding_done = 0
-                    WHERE id = ?
-                    """,
-                    (json.dumps(captions, ensure_ascii=False), json.dumps(cache_paths, ensure_ascii=False), item_id),
-                )
-                self._refresh_item_derived_fields(conn, item_id)
-                conn.commit()
-            finally:
-                conn.close()
+        with self._write_transaction() as conn:
+            conn.execute(
+                """
+                UPDATE items
+                SET image_captions = ?, image_cache_paths = ?, vision_done = 1, embedding_done = 0,
+                    index_dirty = 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (json.dumps(captions, ensure_ascii=False), json.dumps(cache_paths, ensure_ascii=False), now_iso(), item_id),
+            )
 
     def mark_embedding_done(self, item_id: str) -> None:
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute("UPDATE items SET embedding_done = 1, embedding_skipped_reason = NULL WHERE id = ?", (item_id,))
-                conn.commit()
-            finally:
-                conn.close()
-
-    def mark_embedding_skipped(self, item_id: str, reason: str) -> None:
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute(
-                    """
-                    UPDATE items
-                    SET embedding_done = 1,
-                        embedding_skipped_reason = ?
-                    WHERE id = ?
-                    """,
-                    (reason[:240], item_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+        with self._write_transaction() as conn:
+            conn.execute(
+                "UPDATE items SET embedding_done = 1, index_dirty = 0, updated_at = ? WHERE id = ?",
+                (now_iso(), item_id),
+            )
 
     def update_item_metadata(
         self,
@@ -600,49 +393,44 @@ class Store:
             return self.get_item(item_id)
 
         params.append(item_id)
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
-                self._refresh_item_derived_fields(conn, item_id)
-                conn.commit()
-            finally:
-                conn.close()
+        updates.append("updated_at = ?")
+        params.insert(-1, now_iso())
+        with self._write_transaction() as conn:
+            conn.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
         return self.get_item(item_id)
 
     def apply_heat_decay(self, decay: float = 0.95, idle_days: int = 7) -> int:
+        cfg = load_runtime_config()
+        if not cfg.enable_decay:
+            return 0
         cutoff = datetime.now(timezone.utc) - timedelta(days=idle_days)
         today = date.today().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                last_decay = conn.execute(
-                    "SELECT value FROM meta WHERE key = 'last_heat_decay_date'"
-                ).fetchone()
-                if last_decay and last_decay["value"] == today:
-                    return 0
+        with self._write_transaction() as conn:
+            last_decay = conn.execute(
+                "SELECT value FROM meta WHERE key = 'last_heat_decay_date'"
+            ).fetchone()
+            if last_decay and last_decay["value"] == today:
+                return 0
 
-                cur = conn.execute(
-                    """
-                    UPDATE items
-                    SET heat = MAX(0.05, COALESCE(heat, 1.0) * ?)
-                    WHERE archived_at IS NULL
-                      AND DATETIME(COALESCE(last_surfaced, captured_at)) < DATETIME(?)
-                    """,
-                    (float(decay), cutoff.isoformat()),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO meta(key, value)
-                    VALUES('last_heat_decay_date', ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                    """,
-                    (today,),
-                )
-                conn.commit()
-                return int(cur.rowcount or 0)
-            finally:
-                conn.close()
+            cur = conn.execute(
+                """
+                UPDATE items
+                SET heat = MAX(0.05, COALESCE(heat, 1.0) * ?),
+                    updated_at = ?
+                WHERE archived_at IS NULL
+                  AND DATETIME(COALESCE(last_surfaced, captured_at)) < DATETIME(?)
+                """,
+                (float(decay), now_iso(), cutoff.isoformat()),
+            )
+            conn.execute(
+                """
+                INSERT INTO meta(key, value)
+                VALUES('last_heat_decay_date', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (today,),
+            )
+            return int(cur.rowcount or 0)
 
     def bump_heat(
         self,
@@ -657,19 +445,12 @@ class Store:
             updates.append("last_surfaced = ?")
             updates.append("surfaced_count = COALESCE(surfaced_count, 0) + 1")
             params.append(now_iso())
+        updates.append("updated_at = ?")
+        params.append(now_iso())
         params.append(item_id)
 
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
-                row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-                parsed = self._row_to_item(row)
-                if parsed:
-                    update_item_scores(conn, item_id, parsed)
-                conn.commit()
-            finally:
-                conn.close()
+        with self._write_transaction() as conn:
+            conn.execute(f"UPDATE items SET {', '.join(updates)} WHERE id = ?", params)
         return self.get_item(item_id)
 
     def mark_items_surfaced(self, item_ids: list[str]) -> int:
@@ -678,63 +459,32 @@ class Store:
             return 0
         placeholders = ",".join("?" for _ in ids)
         params: list[Any] = [now_iso(), *ids]
-        with self._lock:
-            conn = self._connect()
-            try:
-                cur = conn.execute(
-                    f"""
-                    UPDATE items
-                    SET last_surfaced = ?,
-                        surfaced_count = COALESCE(surfaced_count, 0) + 1,
-                        heat = MIN(10.0, COALESCE(heat, 1.0) + 0.05)
-                    WHERE id IN ({placeholders})
-                    """,
-                    params,
-                )
-                for item_id in ids:
-                    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-                    parsed = self._row_to_item(row)
-                    if parsed:
-                        update_item_scores(conn, item_id, parsed)
-                conn.commit()
-                return int(cur.rowcount or 0)
-            finally:
-                conn.close()
+        with self._write_transaction() as conn:
+            cur = conn.execute(
+                f"""
+                UPDATE items
+                SET last_surfaced = ?,
+                    surfaced_count = COALESCE(surfaced_count, 0) + 1,
+                    heat = MIN(10.0, COALESCE(heat, 1.0) + 0.05),
+                    updated_at = ?
+                WHERE id IN ({placeholders})
+                """,
+                [now_iso(), *params],
+            )
+            return int(cur.rowcount or 0)
 
-    def archive_items(self, item_ids: list[str], reason: str = "manual_archive") -> int:
+    def archive_items(self, item_ids: list[str]) -> int:
         ids = [item_id for item_id in item_ids if item_id]
         if not ids:
             return 0
         placeholders = ",".join("?" for _ in ids)
-        params: list[Any] = [now_iso(), reason[:240], *ids]
-        with self._lock:
-            conn = self._connect()
-            try:
-                cur = conn.execute(
-                    f"UPDATE items SET archived_at = ?, archive_reason = ? WHERE id IN ({placeholders})",
-                    params,
-                )
-                conn.commit()
-                return int(cur.rowcount or 0)
-            finally:
-                conn.close()
-
-    def unarchive_items(self, item_ids: list[str]) -> int:
-        ids = [item_id for item_id in item_ids if item_id]
-        if not ids:
-            return 0
-        placeholders = ",".join("?" for _ in ids)
-        with self._lock:
-            conn = self._connect()
-            try:
-                cur = conn.execute(
-                    f"UPDATE items SET archived_at = NULL, archive_reason = NULL WHERE id IN ({placeholders})",
-                    ids,
-                )
-                conn.commit()
-                return int(cur.rowcount or 0)
-            finally:
-                conn.close()
+        params: list[Any] = [now_iso(), now_iso(), *ids]
+        with self._write_transaction() as conn:
+            cur = conn.execute(
+                f"UPDATE items SET archived_at = ?, updated_at = ? WHERE id IN ({placeholders})",
+                params,
+            )
+            return int(cur.rowcount or 0)
 
     def smart_feed(self, limit: int = 20, mode: str = "default") -> list[dict[str, Any]]:
         conn = self._connect()
@@ -757,7 +507,7 @@ class Store:
         for item in items:
             if not item:
                 continue
-            surface_score, reason, needs_review = score_item(item, mode)
+            surface_score, reason, needs_review = _feed_score(item, mode)
             out = dict(item)
             out["surface_score"] = round(surface_score, 6)
             out["surface_reason"] = reason
@@ -772,13 +522,16 @@ class Store:
         return ranked[:limit]
 
     def search_fts(self, query: str, limit: int = 20, days_back: int | None = None) -> list[dict[str, Any]]:
+        cfg = load_runtime_config()
         conn = self._connect()
         try:
             params: list[Any] = [query]
-            where = ""
+            where = "AND items.archived_at IS NULL"
+            if cfg.hide_sensitive_from_search:
+                where += " AND COALESCE(items.search_hidden, 0) = 0"
             if days_back is not None:
                 cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
-                where = "AND items.captured_at >= ?"
+                where += " AND items.captured_at >= ?"
                 params.append(cutoff.isoformat())
             params.append(limit)
 
@@ -794,19 +547,14 @@ class Store:
                     items.captured_at,
                     items.starred,
                     items.heat,
-                    items.importance_score,
-                    items.resurfacing_score,
-                    items.recency_score,
-                    items.recurrence_score,
+                    items.noise_score,
                     items.capture_confidence,
-                    items.suspicious_prompt_content,
-                    items.embedding_skipped_reason,
+                    items.canonical_url,
+                    items.sensitivity_level,
                     bm25(items_fts) AS bm25_score
                 FROM items_fts
                 JOIN items ON items_fts.rowid = items.rowid
-                WHERE items_fts MATCH ?
-                  AND items.archived_at IS NULL
-                  {where}
+                WHERE items_fts MATCH ? {where}
                 ORDER BY bm25_score ASC
                 LIMIT ?
             """
@@ -840,7 +588,6 @@ class Store:
         conn = self._connect()
         try:
             total = int(conn.execute("SELECT COUNT(*) FROM items").fetchone()[0])
-            archived_total = int(conn.execute("SELECT COUNT(*) FROM items WHERE archived_at IS NOT NULL").fetchone()[0])
             today = int(
                 conn.execute("SELECT COUNT(*) FROM items WHERE DATE(captured_at)=DATE('now', 'localtime')").fetchone()[0]
             )
@@ -858,12 +605,9 @@ class Store:
             ]
             return {
                 "total": total,
-                "archived_total": archived_total,
-                "active_total": max(0, total - archived_total),
                 "today": today,
                 "by_platform": by_platform,
                 "by_type": by_type,
-                "schema_version": self.schema_version(),
             }
         finally:
             conn.close()
@@ -891,14 +635,11 @@ class Store:
         offset: int = 0,
         platform: str | None = None,
         starred_only: bool = False,
-        include_archived: bool = False,
     ) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
             where = []
             params: list[Any] = []
-            if not include_archived:
-                where.append("archived_at IS NULL")
             if platform:
                 where.append("platform = ?")
                 params.append(platform)
@@ -928,56 +669,6 @@ class Store:
                 duplicates += 1
         return {"inserted": inserted, "duplicates": duplicates}
 
-    def schema_version(self) -> int:
-        conn = self._connect()
-        try:
-            row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-            if not row:
-                return 0
-            try:
-                return int(str(row["value"]))
-            except Exception:
-                return 0
-        finally:
-            conn.close()
-
-    def migrate(self, target_version: int | None = None) -> dict[str, Any]:
-        with self._lock:
-            conn = self._connect()
-            try:
-                report = run_migrations_on_connection(conn, target_version=target_version)
-                conn.commit()
-                return report
-            finally:
-                conn.close()
-
-    def related_links(self, item_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT from_item_id, to_item_id, relation_type, weight, reason, created_at
-                FROM memory_links
-                WHERE from_item_id = ?
-                ORDER BY weight DESC, created_at DESC
-                LIMIT ?
-                """,
-                (item_id, max(1, limit)),
-            ).fetchall()
-            return [
-                {
-                    "from_item_id": row["from_item_id"],
-                    "to_item_id": row["to_item_id"],
-                    "relation_type": row["relation_type"],
-                    "weight": float(row["weight"] or 0.0),
-                    "reason": row["reason"],
-                    "created_at": row["created_at"],
-                }
-                for row in rows
-            ]
-        finally:
-            conn.close()
-
     def get_items_by_ids(self, ids: list[str]) -> dict[str, dict[str, Any]]:
         if not ids:
             return {}
@@ -994,16 +685,95 @@ class Store:
         finally:
             conn.close()
 
-    def delete_all(self) -> None:
-        with self._lock:
-            conn = self._connect()
+    def list_dirty_items(self, limit: int = 200) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM items
+                WHERE COALESCE(index_dirty, 0) = 1
+                  AND COALESCE(embedding_skipped, 0) = 0
+                ORDER BY COALESCE(updated_at, captured_at) ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [self._row_to_item(row) for row in rows]
+        finally:
+            conn.close()
+
+    def mark_index_dirty(self, item_id: str) -> None:
+        with self._write_transaction() as conn:
+            conn.execute(
+                "UPDATE items SET index_dirty = 1, embedding_done = 0, updated_at = ? WHERE id = ?",
+                (now_iso(), item_id),
+            )
+
+    def update_integrity_fields(self, item_id: str, fields: dict[str, Any]) -> None:
+        if not fields:
+            return
+        normalized: dict[str, Any] = {}
+        for key, value in fields.items():
+            if key in {"image_urls", "image_captions", "image_cache_paths", "media_urls", "tags", "quality_flags", "related_topics", "related_entities", "sensitivity_reasons"}:
+                normalized[key] = json.dumps(value or [], ensure_ascii=False)
+            elif key in {"capture_debug"}:
+                normalized[key] = json.dumps(value or {}, ensure_ascii=False)
+            else:
+                normalized[key] = value
+        normalized["updated_at"] = now_iso()
+        updates = ", ".join(f"{key} = ?" for key in normalized.keys())
+        params = [normalized[key] for key in normalized.keys()] + [item_id]
+        with self._write_transaction() as conn:
+            conn.execute(f"UPDATE items SET {updates} WHERE id = ?", params)
+
+    def rebuild_all_fingerprints(self) -> int:
+        rows = self.all_items()
+        changed = 0
+        for row in rows:
+            rebuilt = self._normalize_item_for_insert(row).get("dedupe_key")
+            if rebuilt and rebuilt != row.get("dedupe_key"):
+                self.update_integrity_fields(str(row["id"]), {"dedupe_key": rebuilt})
+                changed += 1
+        return changed
+
+    def compact_indexes(self) -> int:
+        with self._write_transaction() as conn:
+            conn.execute("INSERT INTO items_fts(items_fts) VALUES('optimize')")
+            conn.execute("PRAGMA optimize")
+        return 1
+
+    def cleanup_old_logs(self, keep_days: int = 7) -> int:
+        logs_dir = DATA_DIR / "logs"
+        if not logs_dir.exists():
+            return 0
+        now = datetime.now(timezone.utc).timestamp()
+        removed = 0
+        for candidate in logs_dir.glob("memoryfeed.log.*"):
             try:
-                conn.execute("DELETE FROM items")
-                conn.execute("DELETE FROM items_fts")
-                conn.execute("DELETE FROM memory_links")
-                conn.commit()
-            finally:
-                conn.close()
+                age_days = (now - candidate.stat().st_mtime) / 86400.0
+                if age_days > keep_days:
+                    candidate.unlink(missing_ok=True)
+                    removed += 1
+            except Exception:
+                continue
+        return removed
+
+    def recompute_decay_states(self) -> int:
+        cfg = load_runtime_config()
+        rows = self.all_items()
+        changed = 0
+        for row in rows:
+            decay_score, aging_state = compute_decay(row, half_life_days=cfg.decay_half_life_days)
+            if float(row.get("decay_score") or 0.0) != decay_score or str(row.get("aging_state") or "") != aging_state:
+                self.update_integrity_fields(str(row["id"]), {"decay_score": decay_score, "aging_state": aging_state})
+                changed += 1
+        return changed
+
+    def delete_all(self) -> None:
+        with self._write_transaction() as conn:
+            conn.execute("DELETE FROM items")
+            conn.execute("DELETE FROM items_fts")
 
     @staticmethod
     def _row_to_item(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -1015,10 +785,10 @@ class Store:
             "platform": row["platform"],
             "content_type": row["content_type"],
             "text_content": row["text_content"],
-            "image_urls": json.loads(row["image_urls"] or "[]"),
-            "media_urls": json.loads(row["media_urls"] or "[]") if "media_urls" in row.keys() and row["media_urls"] else json.loads(row["image_urls"] or "[]"),
-            "image_captions": json.loads(row["image_captions"] or "[]"),
-            "image_cache_paths": json.loads(row["image_cache_paths"] or "[]"),
+            "image_urls": _safe_json_list(row["image_urls"]),
+            "media_urls": _safe_json_list(row["media_urls"]) if "media_urls" in row.keys() and row["media_urls"] else _safe_json_list(row["image_urls"]),
+            "image_captions": _safe_json_list(row["image_captions"]),
+            "image_cache_paths": _safe_json_list(row["image_cache_paths"]),
             "author": row["author"],
             "author_name": row["author_name"] if "author_name" in row.keys() and row["author_name"] is not None else row["author"],
             "author_handle": row["author_handle"] if "author_handle" in row.keys() else None,
@@ -1031,41 +801,37 @@ class Store:
             "post_id": row["post_id"] if "post_id" in row.keys() else None,
             "thumbnail_url": row["thumbnail_url"] if "thumbnail_url" in row.keys() else None,
             "source_context": row["source_context"] if "source_context" in row.keys() else None,
-            "quality_flags": json.loads(row["quality_flags"] or "[]") if "quality_flags" in row.keys() and row["quality_flags"] else [],
-            "capture_debug": json.loads(row["capture_debug"] or "{}") if "capture_debug" in row.keys() and row["capture_debug"] else {},
-            "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 0.0,
-            "confidence_reasons": json.loads(row["confidence_reasons"] or "[]") if "confidence_reasons" in row.keys() and row["confidence_reasons"] else [],
-            "capture_method": row["capture_method"] if "capture_method" in row.keys() else None,
-            "extractor_version": row["extractor_version"] if "extractor_version" in row.keys() else None,
-            "capture_source": row["capture_source"] if "capture_source" in row.keys() else None,
-            "replay_source": row["replay_source"] if "replay_source" in row.keys() else None,
-            "url_domain": row["url_domain"] if "url_domain" in row.keys() else infer_url_domain(row["canonical_url"] if "canonical_url" in row.keys() else row["url"]),
-            "related_topics": json.loads(row["related_topics"] or "[]") if "related_topics" in row.keys() and row["related_topics"] else [],
-            "related_entities": json.loads(row["related_entities"] or "[]") if "related_entities" in row.keys() and row["related_entities"] else [],
-            "cluster_id": row["cluster_id"] if "cluster_id" in row.keys() else None,
-            "semantic_group": row["semantic_group"] if "semantic_group" in row.keys() else None,
-            "importance_score": float(row["importance_score"]) if "importance_score" in row.keys() and row["importance_score"] is not None else 0.0,
-            "resurfacing_score": float(row["resurfacing_score"]) if "resurfacing_score" in row.keys() and row["resurfacing_score"] is not None else 0.0,
-            "recency_score": float(row["recency_score"]) if "recency_score" in row.keys() and row["recency_score"] is not None else 0.0,
-            "recurrence_score": float(row["recurrence_score"]) if "recurrence_score" in row.keys() and row["recurrence_score"] is not None else 0.0,
-            "ranking_debug": json.loads(row["ranking_debug"] or "{}") if "ranking_debug" in row.keys() and row["ranking_debug"] else {},
-            "embedding_skipped_reason": row["embedding_skipped_reason"] if "embedding_skipped_reason" in row.keys() else None,
-            "suspicious_prompt_content": bool(row["suspicious_prompt_content"]) if "suspicious_prompt_content" in row.keys() else False,
-            "safety_signals": json.loads(row["safety_signals"] or "[]") if "safety_signals" in row.keys() and row["safety_signals"] else [],
+            "quality_flags": _safe_json_list(row["quality_flags"]) if "quality_flags" in row.keys() else [],
+            "capture_debug": _safe_json_dict(row["capture_debug"]) if "capture_debug" in row.keys() else {},
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
             "note": row["note"] if "note" in row.keys() else None,
-            "tags": json.loads(row["tags"] or "[]") if "tags" in row.keys() and row["tags"] else [],
+            "tags": _safe_json_list(row["tags"]) if "tags" in row.keys() else [],
             "heat": float(row["heat"]) if "heat" in row.keys() and row["heat"] is not None else 1.0,
             "last_surfaced": row["last_surfaced"] if "last_surfaced" in row.keys() else None,
             "surfaced_count": int(row["surfaced_count"] or 0) if "surfaced_count" in row.keys() else 0,
             "archived_at": row["archived_at"] if "archived_at" in row.keys() else None,
-            "archive_reason": row["archive_reason"] if "archive_reason" in row.keys() else None,
+            "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 1.0,
+            "noise_score": float(row["noise_score"]) if "noise_score" in row.keys() and row["noise_score"] is not None else 0.0,
+            "low_signal_reason": row["low_signal_reason"] if "low_signal_reason" in row.keys() else None,
+            "decay_score": float(row["decay_score"]) if "decay_score" in row.keys() and row["decay_score"] is not None else 0.0,
+            "aging_state": row["aging_state"] if "aging_state" in row.keys() else "active",
+            "related_topics": _safe_json_list(row["related_topics"]) if "related_topics" in row.keys() else [],
+            "related_entities": _safe_json_list(row["related_entities"]) if "related_entities" in row.keys() else [],
+            "semantic_group": row["semantic_group"] if "semantic_group" in row.keys() else None,
+            "prompt_risk_score": float(row["prompt_risk_score"]) if "prompt_risk_score" in row.keys() and row["prompt_risk_score"] is not None else 0.0,
+            "prompt_risk_reason": row["prompt_risk_reason"] if "prompt_risk_reason" in row.keys() else None,
+            "sensitivity_level": row["sensitivity_level"] if "sensitivity_level" in row.keys() and row["sensitivity_level"] else "none",
+            "sensitivity_reasons": _safe_json_list(row["sensitivity_reasons"]) if "sensitivity_reasons" in row.keys() else [],
+            "embedding_skipped": bool(row["embedding_skipped"]) if "embedding_skipped" in row.keys() else False,
+            "search_hidden": bool(row["search_hidden"]) if "search_hidden" in row.keys() else False,
+            "index_dirty": bool(row["index_dirty"]) if "index_dirty" in row.keys() else False,
+            "updated_at": row["updated_at"] if "updated_at" in row.keys() else None,
         }
 
     @staticmethod
     def _row_to_search_dict(row: sqlite3.Row, bm25_key: str) -> dict[str, Any]:
-        image_urls = json.loads(row["image_urls"] or "[]")
-        cache_paths = json.loads(row["image_cache_paths"] or "[]")
+        image_urls = _safe_json_list(row["image_urls"])
+        cache_paths = _safe_json_list(row["image_cache_paths"])
         thumbnail = cache_paths[0] if cache_paths else (image_urls[0] if image_urls else None)
         return {
             "id": row["id"],
@@ -1078,18 +844,69 @@ class Store:
             "fts_score": float(row[bm25_key]),
             "starred": bool(row["starred"]) if "starred" in row.keys() else False,
             "heat": float(row["heat"]) if "heat" in row.keys() and row["heat"] is not None else 1.0,
-            "importance_score": float(row["importance_score"]) if "importance_score" in row.keys() and row["importance_score"] is not None else 0.0,
-            "resurfacing_score": float(row["resurfacing_score"]) if "resurfacing_score" in row.keys() and row["resurfacing_score"] is not None else 0.0,
-            "recency_score": float(row["recency_score"]) if "recency_score" in row.keys() and row["recency_score"] is not None else 0.0,
-            "recurrence_score": float(row["recurrence_score"]) if "recurrence_score" in row.keys() and row["recurrence_score"] is not None else 0.0,
-            "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 0.0,
-            "suspicious_prompt_content": bool(row["suspicious_prompt_content"]) if "suspicious_prompt_content" in row.keys() else False,
-            "embedding_skipped_reason": row["embedding_skipped_reason"] if "embedding_skipped_reason" in row.keys() else None,
+            "noise_score": float(row["noise_score"]) if "noise_score" in row.keys() and row["noise_score"] is not None else 0.0,
+            "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 1.0,
+            "canonical_url": row["canonical_url"] if "canonical_url" in row.keys() else row["url"],
+            "sensitivity_level": row["sensitivity_level"] if "sensitivity_level" in row.keys() else "none",
         }
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _feed_score(item: dict[str, Any], mode: str) -> tuple[float, str, bool]:
+    now = datetime.now(timezone.utc)
+    captured_at = _parse_iso(item.get("captured_at")) or now
+    last_surfaced = _parse_iso(item.get("last_surfaced"))
+    age_days = max(0.0, (now - captured_at).total_seconds() / 86400.0)
+    untouched_days = max(0.0, (now - (last_surfaced or captured_at)).total_seconds() / 86400.0)
+
+    heat = max(0.05, float(item.get("heat") or 1.0))
+    recency = 1.0 / (1.0 + age_days / 14.0)
+    dwell_bonus = min(0.25, float(item.get("dwell_seconds") or 0.0) / 120.0)
+    star_bonus = 0.45 if item.get("starred") else 0.0
+    resurfacing_gap = 0.18 if age_days >= 3 and untouched_days >= 14 else 0.0
+    decay_penalty = min(0.45, float(item.get("decay_score") or 0.0) * 0.4)
+    noise_penalty = min(0.35, float(item.get("noise_score") or 0.0) * 0.35)
+    mode_bonus = _mode_bonus(item, mode)
+
+    score = heat * 0.68 + recency * 0.2 + dwell_bonus + star_bonus + resurfacing_gap + mode_bonus - decay_penalty - noise_penalty
+    reason = "hot_memory"
+    if age_days >= 30 and untouched_days >= 30:
+        reason = "review_or_archive"
+    elif resurfacing_gap:
+        reason = "worth_resurfacing"
+    elif item.get("starred"):
+        reason = "starred_memory"
+    elif age_days < 2:
+        reason = "recent_capture"
+
+    needs_review = age_days >= 30 and untouched_days >= 30 and heat < 0.8
+    return score, reason, needs_review
+
+
+def _mode_bonus(item: dict[str, Any], mode: str) -> float:
+    content_type = str(item.get("content_type") or "")
+    text = str(item.get("text_content") or "").lower()
+    if mode == "focus":
+        technical_tokens = ("api", "docker", "kubernetes", "database", "architecture", "python", "typescript")
+        return 0.2 if content_type in {"article", "post"} and any(t in text for t in technical_tokens) else 0.05
+    if mode == "light":
+        return 0.18 if content_type in {"video", "image"} else 0.0
+    if mode == "explore":
+        surfaced_count = int(item.get("surfaced_count") or 0)
+        return max(0.0, 0.16 - math.log1p(surfaced_count) * 0.04)
+    return 0.0
 
 
 def _normalize_thumbnail(value: str | None) -> str | None:
@@ -1104,3 +921,39 @@ def _normalize_thumbnail(value: str | None) -> str | None:
     except Exception:
         return None
     return None
+
+
+def _safe_json_list(raw: Any) -> list[Any]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if not isinstance(raw, str):
+        return []
+    try:
+        value = json.loads(raw or "[]")
+    except Exception:
+        return []
+    return value if isinstance(value, list) else []
+
+
+def _safe_json_dict(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        return {}
+    try:
+        value = json.loads(raw or "{}")
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _capture_confidence(item: dict[str, Any]) -> float:
+    flags = item.get("quality_flags") or []
+    missing = sum(1 for flag in flags if str(flag).startswith("missing_"))
+    prompt_risk, _ = assess_prompt_risk(str(item.get("text_content") or ""))
+    penalty = missing * 0.12 + prompt_risk * 0.25
+    return round(max(0.05, min(1.0, 1.0 - penalty)), 6)

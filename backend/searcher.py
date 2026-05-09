@@ -7,6 +7,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.dedupe import diversity_rerank, near_duplicate_cluster_key
+from backend.debug import explain_archival_decision, explain_confidence_reduction, explain_ranking_penalties
+from backend.ranking import score_result
+from backend.runtime_config import load_runtime_config
 from backend.indexer import IndexerService
 from backend.native_accel import rrf_topk_fast
 from backend.store import IMAGE_CACHE_DIR, Store
@@ -18,7 +22,7 @@ class Searcher:
         self.indexer = indexer
         self._cache_ttl_s = 8.0
         self._cache_max_size = 256
-        self._cache: dict[tuple[str, int, int | None, int], tuple[float, list[dict[str, Any]]]] = {}
+        self._cache: dict[tuple[str, int, int | None, int, int], tuple[float, list[dict[str, Any]]]] = {}
         self._cache_lock = threading.Lock()
         self._data_epoch = 0
         self._cache_hits = 0
@@ -33,12 +37,18 @@ class Searcher:
             "merge": 0.0,
         }
 
-    async def search(self, query: str, limit: int = 10, days_back: int | None = None) -> list[dict[str, Any]]:
+    async def search(
+        self,
+        query: str,
+        limit: int = 10,
+        days_back: int | None = None,
+        debug: bool = False,
+    ) -> list[dict[str, Any]]:
         started = time.perf_counter()
         q = (query or "").strip()
         if not q:
             return []
-        cache_key = (q.lower(), int(limit), days_back, self._data_epoch)
+        cache_key = (q.lower(), int(limit), days_back, self._data_epoch, 1 if debug else 0)
         cached = self._cache_get(cache_key)
         if cached is not None:
             self._record_timing(started, {"fts_sem_fetch": 0.0, "item_lookup": 0.0, "merge": 0.0})
@@ -69,8 +79,6 @@ class Searcher:
             item = items_by_id.get(item_id)
             if not item:
                 continue
-            if item.get("archived_at"):
-                continue
             captured_dt = _parse_iso(item.get("captured_at"))
             if cutoff and captured_dt and captured_dt < cutoff:
                 continue
@@ -80,50 +88,56 @@ class Searcher:
             thumbnail = cache_paths[0] if cache_paths else (image_urls[0] if image_urls else None)
             thumbnail = _normalize_thumbnail(thumbnail)
             text_excerpt = (item.get("text_content") or "").strip()[:200]
-            capture_confidence = float(item.get("capture_confidence", 1.0) or 0.0)
-            quality_flags = [str(flag) for flag in (item.get("quality_flags") or [])]
-            missing_penalty = min(0.2, 0.05 * sum(1 for flag in quality_flags if flag.startswith("missing_")))
-            duplicate_penalty = 0.08 if "duplicate_risk" in quality_flags else 0.0
-            quality_multiplier = 0.7 + 0.3 * max(0.0, min(1.0, capture_confidence))
-            effective_score = max(0.0, float(score) * quality_multiplier - missing_penalty - duplicate_penalty)
 
-            merged.append(
-                {
-                    "id": item_id,
-                    "url": item.get("url"),
-                    "platform": item.get("platform", "unknown"),
-                    "text_content": item.get("text_content") or "",
-                    "text_excerpt": text_excerpt,
-                    "thumbnail": thumbnail,
-                    "author": item.get("author"),
-                    "captured_at": item.get("captured_at"),
-                    "score": round(float(score), 8),
-                    "rank_score": round(float(effective_score), 8),
-                    "starred": bool(item.get("starred", False)),
-                    "note": item.get("note"),
-                    "tags": item.get("tags", []),
-                    "heat": float(item.get("heat", 1.0) or 1.0),
-                    "importance_score": float(item.get("importance_score", 0.0) or 0.0),
-                    "resurfacing_score": float(item.get("resurfacing_score", 0.0) or 0.0),
-                    "recency_score": float(item.get("recency_score", 0.0) or 0.0),
-                    "recurrence_score": float(item.get("recurrence_score", 0.0) or 0.0),
-                    "last_surfaced": item.get("last_surfaced"),
-                    "surfaced_count": int(item.get("surfaced_count", 0) or 0),
-                    "archived_at": item.get("archived_at"),
-                    "related_topics": item.get("related_topics", []),
-                    "related_entities": item.get("related_entities", []),
-                    "cluster_id": item.get("cluster_id"),
-                    "semantic_group": item.get("semantic_group"),
-                    "suspicious_prompt_content": bool(item.get("suspicious_prompt_content", False)),
-                    "embedding_skipped_reason": item.get("embedding_skipped_reason"),
-                    "capture_confidence": capture_confidence,
+            base = max(0.0, min(1.0, 1.0 / (1.0 + float(score))))
+            duplicate_penalty = 0.0
+            cluster = near_duplicate_cluster_key(item)
+            if cluster in {r.get("_cluster") for r in merged}:
+                duplicate_penalty = 0.12
+            final_score, factors = score_result(item, base, duplicate_penalty=duplicate_penalty)
+            payload = {
+                "id": item_id,
+                "url": item.get("url"),
+                "platform": item.get("platform", "unknown"),
+                "text_content": item.get("text_content") or "",
+                "text_excerpt": text_excerpt,
+                "thumbnail": thumbnail,
+                "author": item.get("author"),
+                "captured_at": item.get("captured_at"),
+                "score": round(float(final_score), 8),
+                "starred": bool(item.get("starred", False)),
+                "note": item.get("note"),
+                "tags": item.get("tags", []),
+                "heat": float(item.get("heat", 1.0) or 1.0),
+                "last_surfaced": item.get("last_surfaced"),
+                "surfaced_count": int(item.get("surfaced_count", 0) or 0),
+                "archived_at": item.get("archived_at"),
+                "noise_score": float(item.get("noise_score") or 0.0),
+                "capture_confidence": float(item.get("capture_confidence") or 1.0),
+                "_cluster": cluster,
+            }
+            if debug:
+                payload["search_debug"] = {
+                    "ranking_factors": factors,
+                    "matched_fields": _matched_fields(item, q),
+                    "penalties": explain_ranking_penalties(factors),
+                    "archival_decision": explain_archival_decision(item),
+                    "confidence_reduction": explain_confidence_reduction(item),
                 }
-            )
+            merged.append(payload)
             if len(merged) >= max(limit * 3, limit):
                 break
-        stage_merge_ms = (time.perf_counter() - stage_started) * 1000.0
-        merged.sort(key=lambda row: float(row.get("rank_score", 0.0)), reverse=True)
+        cfg = load_runtime_config()
+        if cfg.search_diversity:
+            merged = diversity_rerank(merged, factor=cfg.search_diversity_factor)
         merged = merged[:limit]
+        for row in merged:
+            row.pop("_cluster", None)
+            if debug:
+                dbg = row.get("search_debug") or {}
+                dbg["duplicate_penalty"] = float(row.get("diversity_penalty") or 0.0)
+                row["search_debug"] = dbg
+        stage_merge_ms = (time.perf_counter() - stage_started) * 1000.0
 
         self._cache_put(cache_key, merged)
         self._record_timing(
@@ -157,7 +171,7 @@ class Searcher:
                 "search_last_stage_ms": {k: round(v, 3) for k, v in self._search_last_stage_ms.items()},
             }
 
-    def _cache_get(self, key: tuple[str, int, int | None, int]) -> list[dict[str, Any]] | None:
+    def _cache_get(self, key: tuple[str, int, int | None, int, int]) -> list[dict[str, Any]] | None:
         now = time.monotonic()
         with self._cache_lock:
             row = self._cache.get(key)
@@ -172,7 +186,7 @@ class Searcher:
             self._cache_hits += 1
             return [dict(item) for item in payload]
 
-    def _cache_put(self, key: tuple[str, int, int | None, int], payload: list[dict[str, Any]]) -> None:
+    def _cache_put(self, key: tuple[str, int, int | None, int, int], payload: list[dict[str, Any]]) -> None:
         with self._cache_lock:
             if len(self._cache) >= self._cache_max_size:
                 oldest_key = min(self._cache, key=lambda k: self._cache[k][0])
@@ -210,3 +224,18 @@ def _normalize_thumbnail(value: str | None) -> str | None:
     except Exception:
         return None
     return None
+
+
+def _matched_fields(item: dict[str, Any], query: str) -> list[str]:
+    q = query.lower()
+    fields: list[str] = []
+    if q and q in str(item.get("text_content") or "").lower():
+        fields.append("text_content")
+    if q and q in str(item.get("author_name") or item.get("author") or "").lower():
+        fields.append("author")
+    if q and q in str(item.get("canonical_url") or item.get("url") or "").lower():
+        fields.append("canonical_url")
+    topics = [str(t).lower() for t in (item.get("related_topics") or [])]
+    if q and any(q in topic for topic in topics):
+        fields.append("related_topics")
+    return fields[:5]

@@ -13,6 +13,7 @@ from backend.logging_setup import configure_logging
 from backend.native_accel import status as native_status
 from backend.redaction import redact_value
 from backend.runtime_config import load_runtime_config, provider_requires_key
+from backend.safety import assess_prompt_risk
 from backend.searcher import Searcher
 from backend.safety import sanitize_untrusted_payload
 from backend.store import DATA_DIR, DB_PATH, IMAGE_CACHE_DIR, LANCEDB_DIR, Store
@@ -56,6 +57,7 @@ def _finalize_tool_payload(tool_name: str, payload: dict[str, Any], query: str |
         payload = sanitize_untrusted_payload(payload)
     if cfg.mcp_redact_output:
         payload = redact_value(payload)
+        payload = _sanitize_untrusted_payload(payload)
     result_count = int(payload.get("count", 0))
     log_event(
         logger,
@@ -65,6 +67,30 @@ def _finalize_tool_payload(tool_name: str, payload: dict[str, Any], query: str |
         count=result_count,
         benchmark_context={"query": (query or "")[:200]},
     )
+    return payload
+
+
+def _sanitize_untrusted_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    rows = payload.get("items") or payload.get("results")
+    if not isinstance(rows, list):
+        return payload
+    sanitized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            sanitized.append(row)
+            continue
+        copy = dict(row)
+        risk, reason = assess_prompt_risk(str(copy.get("text_content") or copy.get("text_excerpt") or ""))
+        if risk >= 0.6:
+            copy["text_content"] = "[SANITIZED_UNTRUSTED_CONTENT]"
+            copy["text_excerpt"] = "[SANITIZED_UNTRUSTED_CONTENT]"
+            copy["prompt_risk_score"] = risk
+            copy["prompt_risk_reason"] = reason
+        sanitized.append(copy)
+    if "items" in payload:
+        payload["items"] = sanitized
+    if "results" in payload:
+        payload["results"] = sanitized
     return payload
 
 

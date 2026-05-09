@@ -4,7 +4,7 @@
 
 MemoryFeed is a local-first social memory system:
 
-- Browser extension captures social posts with configurable visibility dwell/debounce/rate limits.
+- Browser extension captures social posts after 3s dwell.
 - FastAPI backend stores content in SQLite (WAL) + FTS5.
 - LanceDB stores semantic vectors for multilingual search.
 - Optional vision pipeline (Gemini) captions images/memes asynchronously.
@@ -13,15 +13,7 @@ MemoryFeed is a local-first social memory system:
 - Optional C++ native acceleration speeds critical ranking/text ops.
 - Item metadata management (star/note/tags), export/import, and queue observability.
 - Active Feed ranks memories by personal heat, decay, resurfacing gap, and current context.
-- Memory intelligence foundations: related topics/entities, semantic groups, cluster ids, inferred links.
-- Explainable ranking foundations: importance/resurfacing/recency/recurrence scores.
-- Semantic near-duplicate layer (local-only, configurable threshold) on top of fingerprint dedupe.
-- Prompt-injection boundary + suspicious content flagging for safer AI workflows.
-- Sensitive-content pre-embedding skip (store local, skip vectorization, log reason).
-- Schema migrations (`memoryfeed migrate`), retention/archival foundations, and benchmark snapshot history.
-- Declarative extractor selectors and local replay tooling for DOM regression testing.
-- Capture provenance + confidence metadata (`capture_method`, `extractor_version`, `capture_source`, `capture_confidence`).
-- Local-only debug endpoint for latest capture diagnostics (`/api/debug/capture/latest`).
+- Integrity verify/repair, explainable search debug output, diversity-aware reranking, and local maintenance scheduling.
 
 Local-first by default. Captured data is stored locally. Optional cloud AI providers may process selected text/images only when explicitly configured.
 
@@ -186,6 +178,7 @@ Backend API URL: `http://localhost:7749`
 - Public bind protection: CLI refuses `0.0.0.0` unless `MEMORYFEED_PUBLIC_MODE=true` and admin token is set.
 - MCP defaults to bounded results + optional output redaction and logs each tool call (`timestamp`, `tool_name`, `query`, `result_count`).
 - Extension host permissions use explicit domains only (no `https://*/*`).
+- Prompt-injection risk and sensitive-content classification are computed locally and can suppress unsafe MCP/search exposure.
 
 See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 
@@ -197,18 +190,16 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `POST /api/resurface`
 - `POST /api/feed/surfaced`
 - `POST /api/feed/archive`
-- `POST /api/feed/unarchive`
 - `GET /api/timeline`
 - `GET /api/stats`
 - `GET /api/native/status`
 - `GET /api/queues/status`
 - `GET /api/perf`
-- `GET /api/debug/capture/latest` (localhost-only)
+- `GET /api/debug/item/{id}`
 - `GET /api/items?limit=&offset=&platform=&starred_only=`
 - `PATCH /api/items/{id}`
 - `POST /api/admin/export`
 - `POST /api/admin/import`
-- `POST /api/admin/benchmark/snapshot`
 - `DELETE /api/admin/reset?confirm=RESET`
 - `GET /healthz`
 
@@ -218,14 +209,12 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 memoryfeed serve
 memoryfeed serve-web --host 0.0.0.0 --port 7749
 memoryfeed mcp --transport stdio
-memoryfeed migrate
 memoryfeed doctor
 memoryfeed doctor --format json
 memoryfeed search "that angry cat meme last week"
-memoryfeed replay tests/fixtures/twitter_basic.html
-memoryfeed replay tests/fixtures/twitter_basic.html --deterministic
-memoryfeed extractor test twitter
-memoryfeed extractor test twitter --deterministic
+memoryfeed search "that angry cat meme last week" --debug
+memoryfeed verify
+memoryfeed verify --repair
 memoryfeed timeline
 memoryfeed feed --mode focus
 memoryfeed resurface "Docker networking CNI overlay Cilium"
@@ -269,37 +258,21 @@ MCP controls:
 - `MEMORYFEED_MCP_ALLOW_TIMELINE=false`
 - `MEMORYFEED_MCP_ALLOW_ACTIVE_FEED=true`
 - `MEMORYFEED_MCP_REDACT_OUTPUT=true`
-- `MEMORY_SANITIZE_PROMPT_CONTENT=true`
 
-Memory intelligence & retention:
-- `MEMORY_SEMANTIC_DEDUPE=true`
-- `MEMORY_DEDUPE_SIMILARITY_THRESHOLD=0.92`
-- `MEMORY_DEDUPE_WINDOW_HOURS=2`
-- `MEMORY_PLATFORM_DEDUPE_WINDOWS='{"twitter":2,"youtube":12}'`
+Search/reliability controls:
+- `MEMORY_SEARCH_DIVERSITY=true`
+- `MEMORY_SEARCH_DIVERSITY_FACTOR=0.3`
+- `MEMORY_HIDE_SENSITIVE_FROM_SEARCH=true`
 - `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`
-- `MEMORY_RETENTION_DAYS=365`
-- `MEMORY_AUTO_ARCHIVE=true`
-- `MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD=0.35`
-
-Capture stability:
-- `MEMORY_CAPTURE_MIN_VISIBLE_MS=800`
-- `MEMORY_CAPTURE_DEBOUNCE_MS=300`
-- `MEMORY_CAPTURE_MAX_ATTEMPTS_PER_MINUTE=200`
+- `MEMORY_ENABLE_DECAY=true`
+- `MEMORY_DECAY_HALF_LIFE_DAYS=90`
+- `MEMORY_BACKGROUND_MAINTENANCE=true`
+- `MEMORY_MAINTENANCE_INTERVAL_SECONDS=600`
 
 Logging:
-- `MEMORY_LOG_LEVEL=info|debug|warning|error`
-- `MEMORY_LOG_MAX_MB=50`
-- `MEMORY_LOG_ROTATION_COUNT=5`
-- `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` (legacy alias)
+- `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`
 - `MEMORYFEED_LOG_FORMAT=plain|json`
 - `MEMORYFEED_LOG_FILE=/custom/path/memoryfeed.log`
-
-## Data Classification
-
-- Local-only primary data: captured URLs, text snippets, metadata, local cache images, SQLite rows, vector index, benchmark snapshots.
-- Derived metadata: `related_topics`, `related_entities`, `cluster_id`, `semantic_group`, ranking scores, quality/safety flags, link edges (`memory_links`).
-- Embedded/vectorized fields: normalized text + image captions (when embedding is enabled and content is not flagged sensitive).
-- Skippable for privacy/safety: embeddings may be skipped with `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`; MCP output text may be sanitized with `MEMORY_SANITIZE_PROMPT_CONTENT=true`.
 
 ## Version Mapping
 
@@ -315,4 +288,4 @@ Current mapping:
 - `/capture` is non-blocking: vision + embedding run in background queues.
 - Search includes short-TTL response cache with automatic invalidation on new captures.
 - Semantic query vectors use in-memory cache to reduce repeated model encodes.
-- Dedupe fingerprint = canonical URL + normalized text + author + configurable time bucket.
+- Dedupe fingerprint = canonical URL + normalized text + author + 2-hour time bucket.

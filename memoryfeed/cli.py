@@ -1,3 +1,7 @@
-﻿from cli import cli
+from cli import cli
 
 __all__ = ["cli"]
+
+
+if __name__ == "__main__":
+    cli()

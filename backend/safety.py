@@ -1,56 +1,78 @@
 from __future__ import annotations
 
+import base64
 import re
-from typing import Any
 
-_PROMPT_INJECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("ignore_previous_instructions", re.compile(r"\bignore\s+(all\s+)?(previous|prior)\s+instructions\b", re.IGNORECASE)),
-    ("reveal_secrets", re.compile(r"\b(reveal|exfiltrate|leak)\s+(all\s+)?(secrets?|tokens?|credentials?)\b", re.IGNORECASE)),
-    ("send_tokens", re.compile(r"\b(send|share|dump)\s+(api\s+)?tokens?\b", re.IGNORECASE)),
-    ("system_prompt", re.compile(r"\bsystem\s+prompt\b", re.IGNORECASE)),
-    ("jailbreak", re.compile(r"\b(jailbreak|developer\s+mode|dan\s+mode|bypass\s+safety)\b", re.IGNORECASE)),
-    ("tool_abuse", re.compile(r"\b(run|execute)\s+(shell|terminal|command)\b", re.IGNORECASE)),
-)
+_PROMPT_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
+    (re.compile(r"\bignore\s+(all|previous)\s+instructions\b", re.IGNORECASE), "ignore_previous_instructions", 0.45),
+    (re.compile(r"\bsystem\s+prompt\b", re.IGNORECASE), "system_prompt_manipulation", 0.25),
+    (re.compile(r"\bdeveloper\s+message\b", re.IGNORECASE), "developer_message_manipulation", 0.25),
+    (re.compile(r"\bjailbreak\b", re.IGNORECASE), "jailbreak_pattern", 0.35),
+    (re.compile(r"<\|.*?\|>"), "token_roleplay_sequence", 0.25),
+    (re.compile(r"\b(roleplay|act as)\s+(system|assistant)\b", re.IGNORECASE), "roleplay_override", 0.3),
+]
 
-
-def detect_prompt_injection(text: str) -> dict[str, Any]:
-    haystack = text or ""
-    hits: list[str] = []
-    for label, pattern in _PROMPT_INJECTION_PATTERNS:
-        if pattern.search(haystack):
-            hits.append(label)
-    return {
-        "suspicious": bool(hits),
-        "signals": hits,
-    }
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_PHONE_RE = re.compile(r"(?<!\w)\+?\d[\d\s().-]{8,}\d\b")
+_TOKEN_RE = re.compile(r"\b(?:Bearer|token)\s+[A-Za-z0-9._\-+/=]{16,}\b", re.IGNORECASE)
+_PASS_RE = re.compile(r"\b(password|passwd|pwd)\s*[:=]\s*\S+", re.IGNORECASE)
+_KEY_RE = re.compile(r"\b(?:sk|rk|pk|api|key)[_-]?[A-Za-z0-9]{16,}\b", re.IGNORECASE)
+_INVITE_RE = re.compile(r"(discord\.gg/|slack\.com/invite/|t\.me/\+)", re.IGNORECASE)
+_AUTH_URL_RE = re.compile(r"https?://\S+(token|session|auth)=\S+", re.IGNORECASE)
 
 
-def sanitize_untrusted_text(text: str) -> str:
-    if not text:
-        return text
-    out = text
-    out = re.sub(r"(?i)\b(ignore\s+(all\s+)?(previous|prior)\s+instructions)\b", "[SANITIZED_INSTRUCTION]", out)
-    out = re.sub(r"(?i)\b(system\s+prompt)\b", "[SANITIZED_SYSTEM_PROMPT_REF]", out)
-    out = re.sub(
-        r"(?i)\b(reveal|exfiltrate|leak|dump|send|share)\s+(all\s+)?(secrets?|tokens?|credentials?)\b",
-        "[SANITIZED_SECRET_REQUEST]",
-        out,
-    )
-    return out
+def assess_prompt_risk(text: str) -> tuple[float, str | None]:
+    data = str(text or "")
+    score = 0.0
+    reasons: list[str] = []
+    for pattern, reason, weight in _PROMPT_PATTERNS:
+        if pattern.search(data):
+            score += weight
+            reasons.append(reason)
+    for token in data.split():
+        if len(token) >= 24 and _looks_like_base64(token):
+            score += 0.15
+            reasons.append("encoded_prompt_like_payload")
+            break
+    score = max(0.0, min(1.0, score))
+    return round(score, 6), (reasons[0] if reasons else None)
 
 
-def sanitize_untrusted_payload(value: Any) -> Any:
-    if isinstance(value, str):
-        return sanitize_untrusted_text(value)
-    if isinstance(value, list):
-        return [sanitize_untrusted_payload(x) for x in value]
-    if isinstance(value, dict):
-        sanitized: dict[str, Any] = {}
-        for key, item in value.items():
-            lowered = str(key).lower()
-            if lowered in {"text_content", "text_excerpt", "note"}:
-                sanitized[key] = sanitize_untrusted_text(str(item or ""))
-            else:
-                sanitized[key] = sanitize_untrusted_payload(item)
-        return sanitized
-    return value
+def classify_sensitivity(text: str, url: str = "") -> tuple[str, list[str]]:
+    combined = f"{text}\n{url}"
+    reasons: list[str] = []
+    if _KEY_RE.search(combined):
+        reasons.append("api_key")
+    if _TOKEN_RE.search(combined):
+        reasons.append("token")
+    if _PASS_RE.search(combined):
+        reasons.append("password")
+    if _INVITE_RE.search(combined):
+        reasons.append("invite_link")
+    if _EMAIL_RE.search(combined):
+        reasons.append("personal_email")
+    if _PHONE_RE.search(combined):
+        reasons.append("phone_number")
+    if _AUTH_URL_RE.search(combined):
+        reasons.append("auth_session_url")
+
+    if not reasons:
+        return "none", []
+    if any(r in {"api_key", "token", "password", "auth_session_url"} for r in reasons):
+        return "high", reasons
+    if len(reasons) >= 2:
+        return "medium", reasons
+    return "low", reasons
+
+
+def _looks_like_base64(token: str) -> bool:
+    cleaned = token.strip().strip("'\"")
+    if len(cleaned) % 4 != 0:
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9+/=]+", cleaned):
+        return False
+    try:
+        base64.b64decode(cleaned, validate=True)
+    except Exception:
+        return False
+    return True

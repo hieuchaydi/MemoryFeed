@@ -111,6 +111,7 @@ class InterestEngine:
             if self._last_decay_date == today:
                 return
             changed = await asyncio.to_thread(self.store.apply_heat_decay)
+            await asyncio.to_thread(self.store.recompute_decay_states)
             self._last_decay_date = today
             if changed:
                 logger.info("interest_decay_applied rows=%s", changed)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import date
@@ -15,8 +16,6 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.table import Table
 
-from backend.extractor_replay import replay_fixture, test_platform_fixtures
-from backend.import_export import build_export_payload, import_payload
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
 from backend.llm_clients import (
@@ -27,11 +26,12 @@ from backend.llm_clients import (
     providers_snapshot,
 )
 from backend.doctor import run_doctor
-from backend.migrate import run_migrations
+from backend.import_export import export_payload, import_payload
 from backend.native_accel import status as native_status
 from backend.runtime_config import is_public_bind_host, load_runtime_config
 from backend.searcher import Searcher
 from backend.store import DATA_DIR, Store
+from backend.verify import verify_store
 from memoryfeed.__version__ import __version__
 
 console = Console()
@@ -51,6 +51,15 @@ def _validate_public_bind_or_exit(host: str, port: int) -> None:
         sys.exit(1)
     os.environ["MEMORYFEED_BIND_HOST"] = host
     os.environ["MEMORYFEED_BIND_PORT"] = str(port)
+
+
+def _open_store_or_exit() -> Store:
+    try:
+        return Store()
+    except sqlite3.OperationalError as exc:
+        console.print(f"[red]Cannot open local database:[/red] {exc}")
+        console.print("Set MEMORYFEED_DATA_DIR to a writable path and retry.")
+        sys.exit(2)
 
 
 @click.group()
@@ -132,99 +141,19 @@ def mcp_server(transport: str, host: str, port: int, path: str) -> None:
     run_mcp(transport=transport, host=host, port=port, path=path)
 
 
-@cli.command("migrate")
-@click.option("--target-version", default=None, type=int, help="Run migrations up to target version")
-def migrate_command(target_version: int | None) -> None:
-    """Run schema migrations."""
-    report = run_migrations(target_version=target_version)
-    table = Table(title="MemoryFeed Migrations")
-    table.add_column("Before")
-    table.add_column("After")
-    table.add_column("Latest")
-    table.add_row(str(report["before"]), str(report["after"]), str(report["latest"]))
-    console.print(table)
-    if report["applied"]:
-        for step in report["applied"]:
-            console.print(f"- applied #{step['revision']}: {step['name']}")
-    else:
-        console.print("No pending migrations.")
-
-
-@cli.command("replay")
-@click.argument("fixture_html", type=click.Path(exists=True, dir_okay=False))
-@click.option("--expected", "expected_snapshot", default=None, help="Optional expected snapshot JSON")
-@click.option("--json-output", is_flag=True, help="Print JSON output")
-@click.option("--deterministic", is_flag=True, help="Use fixed timestamp and stable ordering for replay output")
-def replay_command(
-    fixture_html: str,
-    expected_snapshot: str | None,
-    json_output: bool,
-    deterministic: bool,
-) -> None:
-    """Replay extractor against saved fixture HTML."""
-    result = replay_fixture(fixture_html, expected_snapshot=expected_snapshot, deterministic=deterministic)
-    payload = {
-        "fixture": result.fixture,
-        "platform": result.platform,
-        "deterministic": result.deterministic,
-        "replay_timestamp": result.replay_timestamp,
-        "extracted": result.extracted,
-        "selector_used": result.selector_used,
-        "missing_fields": result.missing_fields,
-        "quality_flags": result.quality_flags,
-        "matches_expected": result.matches_expected,
-        "mismatch_keys": result.mismatch_keys,
-    }
-    if json_output:
-        console.print_json(json.dumps(payload, ensure_ascii=False))
-        return
-
-    console.print(f"fixture: {result.fixture}")
-    console.print(f"platform: {result.platform}")
-    console.print(f"matches_expected: {result.matches_expected}")
-    console.print(f"selector_used: {json.dumps(result.selector_used, ensure_ascii=False)}")
-    console.print(f"missing_fields: {', '.join(result.missing_fields) if result.missing_fields else '(none)'}")
-    console.print(f"quality_flags: {', '.join(result.quality_flags) if result.quality_flags else '(none)'}")
-    console.print(f"extracted: {json.dumps(result.extracted, ensure_ascii=False)}")
-
-
-@cli.group("extractor")
-def extractor_group() -> None:
-    """Extractor diagnostics and fixture tests."""
-
-
-@extractor_group.command("test")
-@click.argument("platform", type=click.Choice(["facebook", "twitter", "youtube", "linkedin", "tiktok"], case_sensitive=False))
-@click.option("--json-output", is_flag=True, help="Print JSON output")
-@click.option("--deterministic", is_flag=True, help="Use fixed timestamp and stable ordering")
-def extractor_test_command(platform: str, json_output: bool, deterministic: bool) -> None:
-    """Run fixture-based extractor tests by platform."""
-    report = test_platform_fixtures(platform.lower(), deterministic=deterministic)
-    if json_output:
-        console.print_json(json.dumps(report, ensure_ascii=False))
-        return
-    console.print(
-        f"platform={report['platform']} fixtures={report['fixtures']} passed={report['passed']} failed={report['failed']}"
-    )
-    for row in report["results"]:
-        status = "PASS" if row["matches_expected"] else "FAIL"
-        console.print(
-            f"[{status}] {Path(str(row['fixture'])).name} missing={row['missing_fields']} mismatch={row['mismatch_keys']}"
-        )
-
-
 @cli.command()
 @click.argument("query", nargs=1)
 @click.option("--limit", default=10, show_default=True, type=int)
 @click.option("--days-back", default=None, type=int)
-def search(query: str, limit: int, days_back: int | None) -> None:
+@click.option("--debug", is_flag=True, help="Show ranking explainability metadata")
+def search(query: str, limit: int, days_back: int | None, debug: bool) -> None:
     """Search from terminal."""
-    store = Store()
+    store = _open_store_or_exit()
     indexer = IndexerService(store)
     searcher = Searcher(store, indexer)
 
     async def _run() -> list[dict]:
-        return await searcher.search(query, limit=limit, days_back=days_back)
+        return await searcher.search(query, limit=limit, days_back=days_back, debug=debug)
 
     results = asyncio.run(_run())
     if not results:
@@ -237,15 +166,46 @@ def search(query: str, limit: int, days_back: int | None) -> None:
     table.add_column("Time", style="green")
     table.add_column("Star")
     table.add_column("URL", style="blue")
+    if debug:
+        table.add_column("Debug", style="magenta")
     for item in results:
-        table.add_row(
-            item["platform"],
-            (item.get("text_excerpt") or item.get("text_content") or "")[:80],
-            item["captured_at"],
-            "yes" if item.get("starred") else "no",
-            item["url"],
-        )
+        debug_summary = ""
+        if debug:
+            info = item.get("search_debug") or {}
+            factors = info.get("ranking_factors") or {}
+            debug_summary = (
+                f"sem={factors.get('semantic_match_score', 0):.2f} "
+                f"rec={factors.get('recency_contribution', 0):.2f} "
+                f"dup={info.get('duplicate_penalty', 0):.2f}"
+            )
+        if debug:
+            table.add_row(
+                item["platform"],
+                (item.get("text_excerpt") or item.get("text_content") or "")[:80],
+                item["captured_at"],
+                "yes" if item.get("starred") else "no",
+                item["url"],
+                debug_summary,
+            )
+        else:
+            table.add_row(
+                item["platform"],
+                (item.get("text_excerpt") or item.get("text_content") or "")[:80],
+                item["captured_at"],
+                "yes" if item.get("starred") else "no",
+                item["url"],
+            )
     console.print(table)
+
+
+@cli.command()
+@click.option("--repair", is_flag=True, help="Apply non-destructive repairs")
+def verify(repair: bool) -> None:
+    """Validate storage integrity and optionally repair non-destructive issues."""
+    store = _open_store_or_exit()
+    report = verify_store(store, repair=repair)
+    payload = report.as_dict()
+    console.print_json(json.dumps(payload, ensure_ascii=False))
 
 
 @cli.command()
@@ -253,7 +213,7 @@ def search(query: str, limit: int, days_back: int | None) -> None:
 def timeline(date_str: str | None) -> None:
     """Show captures by date from terminal."""
     selected = date_str or date.today().isoformat()
-    store = Store()
+    store = _open_store_or_exit()
     items = store.all_for_timeline(selected)
     if not items:
         console.print(f"[yellow]No data for {selected}[/yellow]")
@@ -281,7 +241,7 @@ def timeline(date_str: str | None) -> None:
 )
 def feed(limit: int, mode: str) -> None:
     """Show active feed ranked by personal memory heat."""
-    store = Store()
+    store = _open_store_or_exit()
     indexer = IndexerService(store)
     searcher = Searcher(store, indexer)
     interest = InterestEngine(store, searcher)
@@ -317,7 +277,7 @@ def feed(limit: int, mode: str) -> None:
 @click.option("--no-bump", is_flag=True, help="Return suggestions without updating heat/surfaced metadata")
 def resurface(context: str, limit: int, no_bump: bool) -> None:
     """Surface memories related to current context."""
-    store = Store()
+    store = _open_store_or_exit()
     indexer = IndexerService(store)
     searcher = Searcher(store, indexer)
     interest = InterestEngine(store, searcher)
@@ -351,7 +311,7 @@ def resurface(context: str, limit: int, no_bump: bool) -> None:
 @click.option("--limit", default=30, show_default=True, type=int)
 def items(platform: str | None, starred: bool, limit: int) -> None:
     """List recent items."""
-    store = Store()
+    store = _open_store_or_exit()
     rows = store.list_items(limit=limit, platform=platform, starred_only=starred)
     if not rows:
         console.print("[yellow]No items.[/yellow]")
@@ -369,7 +329,7 @@ def items(platform: str | None, starred: bool, limit: int) -> None:
 @cli.command()
 def stats() -> None:
     """Show statistics."""
-    store = Store()
+    store = _open_store_or_exit()
     payload = store.stats()
     payload["native"] = native_status()
     console.print_json(json.dumps(payload, ensure_ascii=False))
@@ -379,13 +339,13 @@ def stats() -> None:
 @click.option("--out", "out_file", default=None, help="Output JSON file path")
 def export(out_file: str | None) -> None:
     """Export all data to JSON."""
-    store = Store()
-    payload = build_export_payload(store)
+    store = _open_store_or_exit()
+    items = store.export_items()
     export_dir = DATA_DIR / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
     target = Path(out_file) if out_file else export_dir / f"memoryfeed-export-{date.today().isoformat()}.json"
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    console.print(f"[green]Exported {len(payload.get('items', []))} items to {target}[/green]")
+    target.write_text(json.dumps(export_payload(items), ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(f"[green]Exported {len(items)} items to {target}[/green]")
 
 
 @cli.command(name="import")
@@ -397,11 +357,17 @@ def import_items(in_file: str) -> None:
         console.print(f"[red]File not found: {path}[/red]")
         sys.exit(1)
     payload = json.loads(path.read_text(encoding="utf-8"))
-    store = Store()
-    report = import_payload(store, payload)
-    console.print(
-        f"[green]Import done.[/green] inserted={report['inserted']}, duplicates={report['duplicates']}, invalid={report['invalid']}"
-    )
+    items, warnings = import_payload(payload)
+    store = _open_store_or_exit()
+    inserted = 0
+    duplicates = 0
+    for item in items:
+        ok, _ = store.insert_item(item)
+        if ok:
+            inserted += 1
+        else:
+            duplicates += 1
+    console.print(f"[green]Import done.[/green] inserted={inserted}, duplicates={duplicates}, warnings={len(warnings)}")
 
 
 @cli.command()
@@ -410,7 +376,7 @@ def reset() -> None:
     if not Confirm.ask("Delete all MemoryFeed data?"):
         console.print("[yellow]Cancelled.[/yellow]")
         return
-    store = Store()
+    store = _open_store_or_exit()
     store.delete_all()
     console.print("[green]All data removed.[/green]")
 

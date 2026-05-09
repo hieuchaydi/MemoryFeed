@@ -43,27 +43,18 @@ MemoryFeed is local-first: captured memories are stored on the local machine by 
   - bounded result counts (`MEMORYFEED_MCP_MAX_RESULTS`)
   - timeline disabled by default (`MEMORYFEED_MCP_ALLOW_TIMELINE=false`)
   - output redaction enabled by default (`MEMORYFEED_MCP_REDACT_OUTPUT=true`)
-  - optional prompt-content sanitization (`MEMORY_SANITIZE_PROMPT_CONTENT=true`)
   - audit logging for MCP calls (timestamp, tool, query, result count)
-- Prompt injection boundary:
-  - captured text treated as untrusted input
-  - suspicious patterns are flagged (`suspicious_prompt_content=true`) for operator review
-  - content is not auto-deleted by default
-- Sensitive pre-embedding filter:
-  - detect API keys, bearer tokens, emails, invite links, and secret-like strings
-  - skip vectorization when `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`
-  - local storage still preserved (capture is not dropped)
+- Prompt-injection risk scoring on capture (`prompt_risk_score`, `prompt_risk_reason`)
+- Sensitive content classification on capture (`sensitivity_level`, `sensitivity_reasons`)
+- Optional sensitive-data suppression:
+  - hide from search (`MEMORY_HIDE_SENSITIVE_FROM_SEARCH=true`)
+  - skip embedding/indexing (`MEMORY_SKIP_SENSITIVE_EMBEDDING=true`)
+- MCP untrusted-content sanitization path for high prompt-risk records
 - Extension host permissions scoped to explicit domains (no wildcard `https://*/*`)
 - Export/delete controls:
   - explicit admin endpoints
   - reset requires `confirm=RESET`
 - Rotating logs and request-level audit entries
-- Local debug capture endpoint (`/api/debug/capture/latest`) is restricted to localhost clients only
-- Log hardening controls:
-  - `MEMORY_LOG_LEVEL`
-  - `MEMORY_LOG_MAX_MB`
-  - `MEMORY_LOG_ROTATION_COUNT`
-  - sensitive query params are stripped before structured logging
 
 ## Redaction Scope
 
@@ -76,12 +67,15 @@ When MCP redaction is enabled, obvious patterns are masked in outputs:
 
 Redaction is best-effort and pattern-based. It is not a formal DLP system.
 
-## v0.3.1 Safety Notes
+## Storage Integrity Controls
 
-- Suspicious prompt-like content is metadata-flagged, not blocked.
-- MCP sanitization modifies output rendering only; source rows stay local and unchanged.
-- Embedding skip reasons are logged structurally (without raw secret values).
-- Capture provenance/debug metadata excludes raw DOM and avoids full-text logging in info-level events.
+- `memoryfeed verify` scans for malformed records, invalid canonical URLs, missing timestamps, broken references, duplicate fingerprints, missing embedding state, and schema-shape violations.
+- `memoryfeed verify --repair` performs non-destructive repair only:
+  - rebuild fingerprints
+  - normalize canonical URLs
+  - remove invalid cache references
+  - recover invalid timestamps
+- Repair mode does not silently delete user memories.
 
 ## Operational Guidance
 

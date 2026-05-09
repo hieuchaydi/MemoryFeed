@@ -39,6 +39,8 @@
 - Merge ranking with Reciprocal Rank Fusion:
   - `score = 1/(rank_fts + 60) + 1/(rank_sem + 60)`
 - Return compact card-ready results with thumbnail and excerpt.
+- Search explainability is opt-in (`--debug` / `debug=true`) and returns ranking factors without raw sensitive payload dumps.
+- Diversity reranking is enabled by default with `MEMORY_SEARCH_DIVERSITY=true` to avoid near-duplicate result floods.
 
 ## 7) Active Memory Strategy
 - Memories carry `heat`, `last_surfaced`, `surfaced_count`, and `archived_at`.
@@ -46,6 +48,7 @@
 - Related new captures warm older memories through background hybrid retrieval.
 - `/api/feed` ranks by heat, recency, dwell, star state, resurfacing gap, and mode.
 - `/api/resurface` is the ambient integration contract for browser/VS Code/Raycast/MCP context.
+- Decay score and aging state are stored (`decay_score`, `aging_state`) and recomputed by maintenance/decay loops.
 
 ## 8) Frontend Direction
 - Use React + Vite as primary UX (not server-rendered templates).
@@ -77,13 +80,23 @@
   - Windows: `quickstart.ps1`
   - Linux/macOS: `quickstart.sh`
 - CLI includes operational commands for serve, stats, model checks, frontend build, native build.
+- CLI includes `memoryfeed verify` and `memoryfeed verify --repair` for local data integrity checks/repairs.
 
 ## 12) Security & Privacy
 - Outbound inference is allowed only to configured providers (Gemini/Groq).
 - No telemetry.
 - CORS limited to local frontend and browser extension origins.
+- Prompt-risk and sensitivity classification run locally at ingestion time.
+- Sensitive memories can be excluded from search and embedding (`MEMORY_HIDE_SENSITIVE_FROM_SEARCH`, `MEMORY_SKIP_SENSITIVE_EMBEDDING`).
+- MCP output can sanitize untrusted prompt-like content under redaction policy.
 
-## 13) Deferred Decisions
+## 13) Data Integrity & Maintenance
+- SQLite writes use explicit transactional boundaries with rollback-on-failure semantics for capture/update paths.
+- Storage records carry dirty-index state to support incremental reindexing.
+- Background local maintenance handles fingerprint rebuild, index compaction, log cleanup, and decay/ranking recomputation.
+- Export format is versioned (`schema_version`) with backward-compatible import and warnings-first recovery behavior.
+
+## 14) Deferred Decisions
 - Distributed multi-user mode: deferred.
 - Remote sync and multi-device replication: deferred.
 - GPU-specific native acceleration roadmap: deferred until baseline usage metrics.

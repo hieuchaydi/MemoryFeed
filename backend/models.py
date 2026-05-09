@@ -101,6 +101,7 @@ class ItemMetaPatch(BaseModel):
 
 
 class ImportPayload(BaseModel):
+    schema_version: str | None = None
     items: list[dict]
 
 

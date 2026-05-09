@@ -17,14 +17,13 @@ from fastapi.responses import Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.benchmarking import write_benchmark_snapshot
 from backend.capture import normalize_capture
-from backend.debug import latest_capture_debug_payload
-from backend.import_export import build_export_payload, import_payload
+from backend.debug import explain_archival_decision, explain_confidence_reduction, explain_duplicate_decision
+from backend.import_export import export_payload, import_payload
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
-from backend.logging import log_event
 from backend.logging_setup import configure_logging
+from backend.maintenance import MaintenanceScheduler
 from backend.models import (
     ArchiveItemsRequest,
     CaptureRequest,
@@ -37,7 +36,7 @@ from backend.models import (
 from backend.native_accel import status as native_status
 from backend.runtime_config import is_localhost_client, load_runtime_config
 from backend.searcher import Searcher
-from backend.stats import benchmark_history, capture_reliability_rows, current_benchmark
+from backend.stats import build_reliability_dashboard
 from backend.store import DATA_DIR, IMAGE_CACHE_DIR, Store
 from backend.vision import VisionService
 from memoryfeed.__version__ import __version__
@@ -71,6 +70,7 @@ indexer = IndexerService(store)
 vision = VisionService(store, indexer)
 searcher = Searcher(store, indexer)
 interest = InterestEngine(store, searcher)
+maintenance = MaintenanceScheduler(store)
 capture_metrics = collections.defaultdict(lambda: {"attempts": 0, "stored": 0, "duplicates": 0, "missing": 0})
 
 if IMAGE_CACHE_DIR.exists():
@@ -152,11 +152,13 @@ async def startup_event() -> None:
         )
     await indexer.start()
     await vision.start()
+    await maintenance.start()
     logger.info("MemoryFeed started data_dir=%s", store.db_path.parent)
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    await maintenance.stop()
     await vision.stop()
     await indexer.stop()
 
@@ -171,27 +173,26 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
     if any(flag.startswith("missing_") for flag in quality_flags):
         capture_metrics[platform]["missing"] += 1
 
-    log_event(
-        logger,
-        "capture_attempt",
-        platform=platform,
-        selector_used=(item.get("capture_debug") or {}).get("selector_used", {}),
-        quality_flags=quality_flags,
-        suspicious_prompt_content=bool(item.get("suspicious_prompt_content", False)),
+    logger.info(
+        "capture_attempt %s",
+        json.dumps(
+            {
+                "platform": platform,
+                "canonical_url": item.get("canonical_url"),
+                "post_id": item.get("post_id"),
+                "quality_flags": quality_flags,
+                "missing_fields": [f[8:] for f in quality_flags if f.startswith("missing_")],
+                "selector_used": (item.get("capture_debug") or {}).get("selector_used", {}),
+            },
+            ensure_ascii=False,
+        ),
     )
 
     inserted, item_id = await asyncio.to_thread(store.insert_item, item)
 
     if not inserted:
         capture_metrics[platform]["duplicates"] += 1
-        log_event(
-            logger,
-            "capture_duplicate",
-            platform=platform,
-            item_id=item_id,
-            duplicate_reason="dedupe_existing_item",
-            quality_flags=quality_flags,
-        )
+        logger.info("capture duplicate id=%s url=%s", item_id, item.get("url"))
         return CaptureResponse(status="duplicate", id=item_id)
 
     capture_metrics[platform]["stored"] += 1
@@ -201,14 +202,7 @@ async def capture_item(payload: CaptureRequest) -> CaptureResponse:
         await indexer.enqueue(item["id"])
     searcher.bump_data_epoch()
     asyncio.create_task(_warm_related_memories(item["id"]))
-    log_event(
-        logger,
-        "capture_stored",
-        platform=item.get("platform", "unknown"),
-        item_id=item["id"],
-        quality_flags=quality_flags,
-        selector_used=(item.get("capture_debug") or {}).get("selector_used", {}),
-    )
+    logger.info("capture stored id=%s platform=%s", item["id"], item.get("platform"))
     return CaptureResponse(status="stored", id=item["id"])
 
 
@@ -224,8 +218,9 @@ async def search_api(
     q: str = Query(default="", min_length=0),
     limit: int = Query(default=10, ge=1, le=100),
     days_back: int | None = Query(default=None, ge=1, le=3650),
+    debug: bool = Query(default=False),
 ) -> dict[str, Any]:
-    results = await searcher.search(query=q, limit=limit, days_back=days_back)
+    results = await searcher.search(query=q, limit=limit, days_back=days_back, debug=debug)
     return {"query": q, "count": len(results), "results": results}
 
 
@@ -272,23 +267,30 @@ async def archive_feed_items_api(payload: ArchiveItemsRequest) -> dict[str, Any]
     return {"ok": True, "updated": count}
 
 
-@app.post("/api/feed/unarchive")
-async def unarchive_feed_items_api(payload: ArchiveItemsRequest) -> dict[str, Any]:
-    count = await asyncio.to_thread(store.unarchive_items, payload.item_ids)
-    searcher.bump_data_epoch()
-    return {"ok": True, "updated": count}
-
-
 @app.get("/api/stats")
 async def stats_api() -> dict[str, Any]:
     payload = await asyncio.to_thread(store.stats)
-    payload["capture_reliability"] = capture_reliability_rows(capture_metrics)
-    payload["benchmark_current"] = current_benchmark(capture_metrics, version=__version__)
-    payload["benchmark_history"] = benchmark_history(limit=10)
+    payload["capture_reliability"] = [
+        {
+            "platform": platform,
+            "attempts": stats["attempts"],
+            "stored": stats["stored"],
+            "duplicates": stats["duplicates"],
+            "missing_required": stats["missing"],
+            "success_rate": round((stats["stored"] / stats["attempts"]) if stats["attempts"] else 0.0, 4),
+            "fail_rate": round((1 - (stats["stored"] / stats["attempts"])) if stats["attempts"] else 0.0, 4),
+        }
+        for platform, stats in sorted(capture_metrics.items(), key=lambda item: item[0])
+    ]
     payload["queues"] = {
         "indexer": indexer.status(),
         "vision": vision.status(),
     }
+    payload["reliability_dashboard"] = build_reliability_dashboard(
+        await asyncio.to_thread(store.all_items),
+        capture_reliability=payload["capture_reliability"],
+        replay_history=[],
+    )
     return payload
 
 
@@ -315,15 +317,29 @@ async def perf_api() -> dict[str, Any]:
     }
 
 
+@app.get("/api/debug/item/{item_id}")
+async def debug_item_api(item_id: str) -> dict[str, Any]:
+    item = await asyncio.to_thread(store.get_item, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {
+        "item_id": item_id,
+        "duplicate_decision": explain_duplicate_decision(item),
+        "archival_decision": explain_archival_decision(item),
+        "confidence_reduction": explain_confidence_reduction(item),
+        "prompt_risk_score": item.get("prompt_risk_score"),
+        "prompt_risk_reason": item.get("prompt_risk_reason"),
+    }
+
+
 @app.get("/api/items")
 async def list_items_api(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     platform: str | None = Query(default=None),
     starred_only: bool = Query(default=False),
-    include_archived: bool = Query(default=False),
 ) -> dict[str, Any]:
-    items = await asyncio.to_thread(store.list_items, limit, offset, platform, starred_only, include_archived)
+    items = await asyncio.to_thread(store.list_items, limit, offset, platform, starred_only)
     return {"count": len(items), "items": items}
 
 
@@ -344,65 +360,47 @@ async def patch_item_api(item_id: str, payload: ItemMetaPatch) -> dict[str, Any]
 
 @app.post("/api/admin/export")
 async def export_data_api(_auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
-    payload = await asyncio.to_thread(build_export_payload, store)
+    items = await asyncio.to_thread(store.export_items)
     export_path = DATA_DIR / "exports"
     export_path.mkdir(parents=True, exist_ok=True)
     target = export_path / f"memoryfeed-export-{date.today().isoformat()}.json"
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "file": str(target), "count": len(payload.get("items", []))}
+    target.write_text(json.dumps(export_payload(items), ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "file": str(target), "count": len(items)}
 
 
 @app.post("/api/admin/import")
 async def import_data_api(payload: ImportPayload, _auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
-    report = await asyncio.to_thread(import_payload, store, {"items": payload.items})
+    inserted = 0
+    duplicates = 0
     enqueued_vision = 0
     enqueued_index = 0
 
-    for item_id in report.get("inserted_ids", []):
-        item = await asyncio.to_thread(store.get_item, item_id)
-        if not item:
-            continue
-        if item.get("image_urls"):
-            await vision.enqueue(item_id)
-            enqueued_vision += 1
+    items, warnings = import_payload({"schema_version": payload.schema_version, "items": payload.items})
+    for item in items:
+        ok, item_id = await asyncio.to_thread(store.insert_item, item)
+        if ok:
+            inserted += 1
+            if item.get("image_urls"):
+                await vision.enqueue(item["id"])
+                enqueued_vision += 1
+            else:
+                await indexer.enqueue(item["id"])
+                enqueued_index += 1
         else:
-            await indexer.enqueue(item_id)
-            enqueued_index += 1
-    if report["inserted"]:
+            duplicates += 1
+    if inserted:
         searcher.bump_data_epoch()
 
-    response = {
+    report = {
         "ok": True,
-        "inserted": report["inserted"],
-        "duplicates": report["duplicates"],
-        "invalid": report["invalid"],
+        "inserted": inserted,
+        "duplicates": duplicates,
         "enqueued_vision": enqueued_vision,
         "enqueued_index": enqueued_index,
+        "warnings": warnings,
     }
-    logger.info("admin import inserted=%s duplicates=%s invalid=%s", report["inserted"], report["duplicates"], report["invalid"])
-    return response
-
-
-@app.get("/api/debug/capture/latest")
-async def debug_latest_capture_api(request: Request) -> dict[str, Any]:
-    if not is_localhost_client(request.client.host if request.client else None):
-        raise HTTPException(status_code=403, detail="Debug endpoint only available from localhost")
-    latest = await asyncio.to_thread(store.latest_item)
-    return latest_capture_debug_payload(latest)
-
-
-@app.post("/api/admin/benchmark/snapshot")
-async def benchmark_snapshot_api(_auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
-    path = await asyncio.to_thread(write_benchmark_snapshot, capture_metrics, __version__)
-    log_event(
-        logger,
-        "benchmark_snapshot_written",
-        platform="all",
-        count=len(capture_metrics),
-        version=__version__,
-        benchmark_context={"file": str(path)},
-    )
-    return {"ok": True, "file": str(path), "rows": len(capture_metrics)}
+    logger.info("admin import inserted=%s duplicates=%s", inserted, duplicates)
+    return report
 
 
 @app.delete("/api/admin/reset")
