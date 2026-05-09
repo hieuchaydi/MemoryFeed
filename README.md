@@ -8,7 +8,9 @@
 
 ## Demo Video
 
-- [Watch demo video](video/ShareX_VF7qbHSZPP.mp4)
+- [Watch GIF demo](video/chrome_L8bUDtoiAS.gif)
+
+![MemoryFeed Demo](video/chrome_L8bUDtoiAS.gif)
 
 MemoryFeed is a local-first social memory system:
 
