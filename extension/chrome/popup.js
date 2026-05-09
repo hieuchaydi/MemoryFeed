@@ -1,4 +1,4 @@
-const input = document.getElementById("q");
+﻿const input = document.getElementById("q");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 const debugBox = document.getElementById("debugBox");
@@ -28,9 +28,19 @@ function renderResults(results) {
     return;
   }
 
+  const ordered = [...results].sort((a, b) => {
+    const aVideo = isVideoItem(a);
+    const bVideo = isVideoItem(b);
+    if (aVideo !== bVideo) return bVideo ? 1 : -1;
+    if (aVideo && bVideo) {
+      return toEpoch(b.captured_at) - toEpoch(a.captured_at);
+    }
+    return 0;
+  });
+
   statusEl.textContent = `Tìm thấy ${results.length} kết quả`;
 
-  for (const item of results) {
+  for (const item of ordered) {
     const a = document.createElement("a");
     a.className = "item";
     a.href = item.url;
@@ -48,6 +58,19 @@ function renderResults(results) {
     a.appendChild(text);
     resultsEl.appendChild(a);
   }
+}
+
+function isVideoItem(item) {
+  const type = String(item?.content_type || "").toLowerCase();
+  if (type === "video") return true;
+  const platform = String(item?.platform || "").toLowerCase();
+  if (platform === "youtube" || platform === "tiktok") return true;
+  return /\/video\/\d+/.test(String(item?.url || ""));
+}
+
+function toEpoch(value) {
+  const ts = Date.parse(String(value || ""));
+  return Number.isFinite(ts) ? ts : 0;
 }
 
 function renderDebug(status) {
@@ -131,6 +154,5 @@ btnCaptureNow.addEventListener("click", () => {
     await refreshDebugStatus();
   });
 });
-
 
 void refreshDebugStatus();

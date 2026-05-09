@@ -2,6 +2,7 @@ export interface FeedItem {
   id: string;
   url: string;
   platform: string;
+  content_type?: string | null;
   captured_at: string;
   text_content?: string | null;
   text_excerpt?: string | null;

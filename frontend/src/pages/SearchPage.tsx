@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchNativeStatus, fetchStats, patchItem, searchFeed } from "../api/client";
@@ -41,7 +41,13 @@ export default function SearchPage() {
   });
 
   const rawResults = searchQ.data?.results || [];
-  const results = starredOnly ? rawResults.filter((x) => x.starred) : rawResults;
+  const results = useMemo(() => {
+    const filtered = starredOnly ? rawResults.filter((x) => x.starred) : rawResults;
+    const videos = filtered.filter((item) => isVideoItem(item));
+    const nonVideos = filtered.filter((item) => !isVideoItem(item));
+    videos.sort((a, b) => toEpoch(b.captured_at) - toEpoch(a.captured_at));
+    return [...videos, ...nonVideos];
+  }, [rawResults, starredOnly]);
 
   return (
     <section className="page">
@@ -107,4 +113,16 @@ export default function SearchPage() {
       </div>
     </section>
   );
+}
+
+function isVideoItem(item: FeedItem): boolean {
+  if ((item.content_type || "").toLowerCase() === "video") return true;
+  const platform = (item.platform || "").toLowerCase();
+  if (platform === "youtube" || platform === "tiktok") return true;
+  return /\/video\/\d+/.test(item.url || "");
+}
+
+function toEpoch(value: string): number {
+  const ts = Date.parse(value || "");
+  return Number.isFinite(ts) ? ts : 0;
 }

@@ -99,6 +99,7 @@ class Searcher:
                 "id": item_id,
                 "url": item.get("url"),
                 "platform": item.get("platform", "unknown"),
+                "content_type": item.get("content_type", "post"),
                 "text_content": item.get("text_content") or "",
                 "text_excerpt": text_excerpt,
                 "thumbnail": thumbnail,
