@@ -145,11 +145,14 @@ async def request_logging_middleware(request: Request, call_next) -> Response:
     except Exception:
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
         logger.exception(
-            "request_failed method=%s path=%s request_id=%s duration_ms=%s",
-            request.method,
-            request.url.path,
-            request_id,
-            elapsed_ms,
+            "request_failed",
+            extra={
+                "event": "request_failed",
+                "method": request.method,
+                "path": request.url.path,
+                "request_id": request_id,
+                "duration_ms": elapsed_ms,
+            },
         )
         raise
 
@@ -157,12 +160,15 @@ async def request_logging_middleware(request: Request, call_next) -> Response:
     response.headers["x-request-id"] = request_id
     if request.url.path != "/healthz":
         logger.info(
-            "request method=%s path=%s status=%s request_id=%s duration_ms=%s",
-            request.method,
-            request.url.path,
-            response.status_code,
-            request_id,
-            elapsed_ms,
+            "request",
+            extra={
+                "event": "request",
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "request_id": request_id,
+                "duration_ms": elapsed_ms,
+            },
         )
     return response
 
@@ -418,6 +424,7 @@ async def stats_api() -> dict[str, Any]:
     payload["at_rest_encryption"] = {
         "enabled": crypto.state.enabled,
         "provider": crypto.state.provider,
+        "algorithm": getattr(crypto, "_algo", "unknown"),
     }
     cfg = load_runtime_config()
     guard = verify_local_only_mode(cfg)
@@ -597,6 +604,15 @@ async def admin_encrypt_migrate_api(
     _auth: None = Depends(require_sensitive_access),
 ) -> dict[str, Any]:
     report = await asyncio.to_thread(store.migrate_encrypt_sensitive_fields, limit)
+    return {"ok": True, **report}
+
+
+@app.post("/api/admin/encryption/migrate-media")
+async def admin_encrypt_media_migrate_api(
+    limit: int = Query(default=5000, ge=1, le=50000),
+    _auth: None = Depends(require_sensitive_access),
+) -> dict[str, Any]:
+    report = await asyncio.to_thread(store.migrate_encrypt_media, limit)
     return {"ok": True, **report}
 
 

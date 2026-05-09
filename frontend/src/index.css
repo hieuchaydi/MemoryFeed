@@ -577,6 +577,46 @@ textarea.query-input {
   background: var(--bg);
 }
 
+.ops-heatmap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.ops-heatmap-cell {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+
+.ops-heatmap-cell small,
+.ops-heatmap-cell span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.ops-heatmap-cell b {
+  font-family: var(--mono);
+}
+
+.ops-curve {
+  width: 100%;
+  max-height: 190px;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  margin-bottom: 8px;
+}
+
+.ops-scrubber {
+  width: 100%;
+  accent-color: var(--accent-strong);
+}
+
 .preview-overlay {
   position: fixed;
   inset: 0;

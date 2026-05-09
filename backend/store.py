@@ -1070,6 +1070,9 @@ class Store:
                 updated += 1
         return {"processed": len(rows), "updated": updated}
 
+    def migrate_encrypt_media(self, limit: int = 5000) -> dict[str, int]:
+        return self._crypto.migrate_media_folder(IMAGE_CACHE_DIR, IMAGE_ENCRYPTED_DIR, limit=limit)
+
     @staticmethod
     def _row_to_item(row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:

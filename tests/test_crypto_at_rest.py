@@ -37,6 +37,31 @@ class AtRestCryptoTests(unittest.TestCase):
                 self.assertTrue(crypto.state.enabled)
                 self.assertIn(crypto.state.provider, {"generated_file", "file", "keyring", "env"})
 
+    def test_media_folder_migration_writes_encrypted_files(self) -> None:
+        key = base64.urlsafe_b64encode(b"b" * 32).decode("ascii")
+        with tempfile.TemporaryDirectory(prefix="memoryfeed-media-enc-") as tmp:
+            root = Path(tmp)
+            plain = root / "images"
+            enc = root / "images_enc"
+            plain.mkdir(parents=True, exist_ok=True)
+            (plain / "sample.jpg").write_bytes(b"raw-image-bytes")
+            with patch.dict(
+                os.environ,
+                {
+                    "MEMORY_ENCRYPTION_ENABLED": "1",
+                    "MEMORY_ENCRYPTION_KEY": key,
+                    "MEMORY_ENCRYPTION_ALGO": "chacha20poly1305",
+                    "MEMORYFEED_DATA_DIR": str(root),
+                },
+                clear=False,
+            ):
+                crypto = AtRestCrypto()
+                report = crypto.migrate_media_folder(plain, enc, limit=10)
+                self.assertEqual(report["processed"], 1)
+                self.assertEqual(report["encrypted"], 1)
+                payload = (enc / "sample.jpg.menc").read_bytes()
+                self.assertTrue(payload.startswith((b"MFENC1", b"MFENC2")))
+
 
 if __name__ == "__main__":
     unittest.main()
