@@ -31,8 +31,8 @@ const enContent: DocsContent = {
   hero: {
     title: "MemoryFeed Docs",
     description:
-      "Standalone documentation for MemoryFeed: local-first social memory, Active Feed, context resurfacing, MCP, API, CLI, extension, and deployment.",
-    badges: ["Local-first", "Active Feed", "MCP Ready", "React + FastAPI"],
+      "Standalone production documentation for MemoryFeed: local-first memory, lifecycle engine, namespace isolation, encryption modes, MCP, API, CLI, extension, and operations.",
+    badges: ["Local-first", "Lifecycle", "Namespace Isolation", "Encryption Ready", "MCP Ready"],
   },
   navItems: [
     { id: "overview", label: "Overview" },
@@ -44,6 +44,10 @@ const enContent: DocsContent = {
     { id: "mcp", label: "MCP" },
     { id: "extension", label: "Extension" },
     { id: "storage", label: "Storage" },
+    { id: "ops", label: "Ops" },
+    { id: "security", label: "Security" },
+    { id: "testing", label: "Testing" },
+    { id: "release", label: "Release" },
     { id: "deploy", label: "Deploy" },
   ],
   sections: [
@@ -71,6 +75,7 @@ const enContent: DocsContent = {
         { title: "macOS / Linux", code: "bash quickstart.sh" },
         { title: "Public web", code: "bash deploy_web.sh\n# or Windows\n.\\deploy_web.ps1" },
         { title: "Manual dev", code: "memoryfeed serve\ncd frontend && npm run dev" },
+        { title: "Encryption migrate", code: "memoryfeed encrypt-migrate --limit 2000" },
       ],
       checklist: [
         "Python 3.12+",
@@ -78,6 +83,7 @@ const enContent: DocsContent = {
         "GEMINI_API_KEY for vision/multimodal understanding",
         "GROQ_API_KEY for Qwen rewrite/summarization",
         "Visual Studio C++ Build Tools or GCC/Clang for native acceleration",
+        "Production recommendation: MEMORY_ENCRYPTION_MODE=compat -> migrate -> strict",
       ],
     },
     {
@@ -87,8 +93,8 @@ const enContent: DocsContent = {
       cards: [
         { title: "extension/chrome", lines: ["Chromium extension captures posts, images, and metadata from browser."] },
         { title: "extension/firefox", lines: ["Firefox temporary add-on package."] },
-        { title: "backend", lines: ["FastAPI server, capture normalization, SQLite store, searcher, indexer, vision queue, MCP server."] },
-        { title: "frontend", lines: ["React + Vite operator console: Search, Active Feed, Timeline, Stats."] },
+        { title: "backend", lines: ["FastAPI server, capture normalization, SQLite store, searcher, indexer, vision queue, MCP server, metrics/readiness."] },
+        { title: "frontend", lines: ["React + Vite operator console: Search, Active Feed, Timeline, Stats, Ops dashboard."] },
         { title: "native", lines: ["pybind11 C++ module for normalize text and RRF top-k acceleration."] },
         { title: "docs-react", lines: ["Standalone docs site, independently deployed on Vercel."] },
       ],
@@ -117,8 +123,8 @@ const enContent: DocsContent = {
         { title: "Search", code: "GET /api/search?q=&limit=&days_back=" },
         { title: "Active Feed", code: "GET /api/feed?limit=20&mode=default\nPOST /api/resurface\nPOST /api/feed/surfaced\nPOST /api/feed/archive" },
         { title: "Timeline & Items", code: "GET /api/timeline?date=&platform=\nGET /api/items?limit=&offset=&platform=&starred_only=\nPATCH /api/items/{id}" },
-        { title: "Ops", code: "GET /api/stats\nGET /api/native/status\nGET /api/queues/status\nGET /api/perf\nGET /healthz" },
-        { title: "Admin", code: "POST /api/admin/export\nPOST /api/admin/import\nDELETE /api/admin/reset?confirm=RESET" },
+        { title: "Ops", code: "GET /api/stats\nGET /api/native/status\nGET /api/queues/status\nGET /api/perf\nGET /healthz\nGET /readyz\nGET /metrics" },
+        { title: "Admin", code: "POST /api/admin/export\nPOST /api/admin/import\nGET /api/admin/dead-letters\nPOST /api/admin/encryption/migrate\nDELETE /api/admin/reset?confirm=RESET" },
       ],
     },
     {
@@ -129,9 +135,10 @@ const enContent: DocsContent = {
         { title: "Serve", code: "memoryfeed serve\nmemoryfeed serve-web --host 0.0.0.0 --port 7749" },
         { title: "Search", code: "memoryfeed search \"that angry cat meme last week\"\nmemoryfeed timeline\nmemoryfeed items --starred" },
         { title: "Active Memory", code: "memoryfeed feed --mode focus\nmemoryfeed resurface \"Docker networking CNI overlay Cilium\"" },
-        { title: "Ops", code: "memoryfeed stats\nmemoryfeed perf\nmemoryfeed models" },
+        { title: "Ops", code: "memoryfeed stats\nmemoryfeed perf\nmemoryfeed models\nmemoryfeed dead-letters --limit 100" },
         { title: "Data", code: "memoryfeed export\nmemoryfeed import --file ~/.memoryfeed/exports/memoryfeed-export-YYYY-MM-DD.json\nmemoryfeed reset" },
         { title: "Build", code: "memoryfeed build-native\nmemoryfeed build-frontend" },
+        { title: "Security", code: "memoryfeed encrypt-migrate --limit 2000" },
       ],
     },
     {
@@ -164,9 +171,10 @@ const enContent: DocsContent = {
       title: "Storage, Logging, and Privacy",
       kicker: "By default all user data stays on local machine.",
       commands: [
-        { title: "Storage paths", code: "~/.memoryfeed/memoryfeed.db\n~/.memoryfeed/lancedb/\n~/.memoryfeed/images/" },
+        { title: "Storage paths", code: "~/.memoryfeed/memoryfeed.db\n~/.memoryfeed/lancedb/\n~/.memoryfeed/images/\n~/.memoryfeed/images_enc/\n~/.memoryfeed/keys/master.key" },
         { title: "Logging", code: "~/.memoryfeed/logs/memoryfeed.log\nMEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR\nMEMORYFEED_LOG_FORMAT=plain|json" },
         { title: "Model env", code: "GEMINI_API_KEY=...\nGROQ_API_KEY=...\nMEMORYFEED_GEMINI_MODEL=gemini-2.5-flash\nMEMORYFEED_GROQ_MODEL=qwen/qwen3-32b" },
+        { title: "Encryption env", code: "MEMORY_ENCRYPTION_MODE=off|compat|strict\nMEMORY_ENCRYPTION_KEY=<base64url-32-byte>\nMEMORY_ENCRYPTION_KEY_FILE=~/.memoryfeed/keys/master.key" },
       ],
       checklist: [
         "SQLite runs in WAL mode and FTS5.",
@@ -174,6 +182,90 @@ const enContent: DocsContent = {
         "Image cache is stored under ~/.memoryfeed/images to avoid dead remote image links.",
         "No telemetry.",
         "If Gemini/Groq fails, text capture still persists and pipeline degrades gracefully.",
+        "Queue retry/backoff + dead-letter persistence for indexer/vision.",
+        "Readiness on /readyz and metrics on /metrics.",
+      ],
+    },
+    {
+      id: "ops",
+      title: "Ops Dashboard and Reliability",
+      kicker: "Monitor memory runtime health in real time.",
+      body: [
+        "The /ops page in frontend shows readiness, queue status, dead letters, heatmap cells, aging actions, and lifecycle events.",
+        "GET /api/perf returns queue metrics, provider breaker states, and dead-letter snapshot.",
+        "Dead-letter records are persisted in SQLite for audit and controlled replay.",
+      ],
+      commands: [
+        { title: "Web Ops", code: "Frontend route: /ops" },
+        { title: "Readiness", code: "GET /readyz" },
+        { title: "Metrics", code: "GET /metrics" },
+        { title: "Perf", code: "GET /api/perf" },
+      ],
+      checklist: [
+        "Track queue backlog and dead-letter growth anomalies.",
+        "Check provider circuit breaker state when Gemini/Groq fail repeatedly.",
+        "Use MEMORYFEED_LOG_FORMAT=json in production for log pipeline ingestion.",
+      ],
+    },
+    {
+      id: "security",
+      title: "Security and At-rest Encryption",
+      kicker: "Production requires safe encryption rollout without downtime.",
+      body: [
+        "MemoryFeed supports off/compat/strict mode. Recommended rollout: compat first for legacy reads, migrate, then strict.",
+        "Master key is loaded from OS keyring first; local key file is fallback only.",
+        "Media migration endpoint moves cached images into encrypted storage in controlled batches and writes migration manifest.",
+      ],
+      commands: [
+        { title: "Mode rollout", code: "MEMORY_ENCRYPTION_MODE=compat\nmemoryfeed serve\nPOST /api/admin/encryption/migrate\nPOST /api/admin/encryption/migrate-media\nMEMORY_ENCRYPTION_MODE=strict" },
+        { title: "Encryption env", code: "MEMORY_ENCRYPTION_MODE=off|compat|strict\nMEMORY_ENCRYPTION_ALGO=xchacha20poly1305|chacha20poly1305\nMEMORY_ENCRYPTION_KEY=<base64url-32-byte>\nMEMORY_ENCRYPTION_KEY_FILE=~/.memoryfeed/keys/master.key" },
+      ],
+      checklist: [
+        "Back up DB and image folders before migration.",
+        "Run migration in batches to avoid IO spikes.",
+        "Verify /api/stats.at_rest_encryption before and after rollout.",
+        "Enable strict only after legacy plaintext is migrated.",
+      ],
+    },
+    {
+      id: "testing",
+      title: "Testing and Evaluation",
+      kicker: "v1.1.0 target is regression-safe behavior with measurable quality.",
+      body: [
+        "Unit tests cover capture normalization, selector registry, crypto, retention, safety, and ranking.",
+        "Integration tests validate queues, dead letters, migration compatibility, and admin endpoints.",
+        "Evaluation suite combines fixture replay and benchmark scenarios to catch capture/retrieval regressions before release.",
+      ],
+      commands: [
+        { title: "Backend tests", code: "python -m pytest -q" },
+        { title: "Targeted regression", code: "python -m pytest tests/test_crypto_at_rest.py tests/test_selector_registry.py tests/test_reliability_dashboard.py -q" },
+        { title: "Frontend build check", code: "cd frontend && npm run build" },
+        { title: "Research eval", code: "python -m pytest tests/test_research_eval.py tests/test_benchmark_evaluation.py -q" },
+      ],
+      checklist: [
+        "Each PR should pass unit + integration + frontend build.",
+        "Track capture confidence drift via fixture replay.",
+        "Run regression suite on release branch before tagging.",
+      ],
+    },
+    {
+      id: "release",
+      title: "CI/CD and Release Runbook",
+      kicker: "Separate quality, migration, and rollback gates.",
+      body: [
+        "Recommended pipeline stages: lint/typecheck, tests, artifact builds, release-candidate smoke.",
+        "Production rollout should follow blue/green or canary where multi-node deployments exist.",
+        "Create release tags only after backup, migration verification, readiness/metrics, and extension replay checks pass.",
+      ],
+      commands: [
+        { title: "Suggested workflow", code: ".github/workflows/ci.yml\n- backend-test\n- frontend-build\n- docs-build\n- fixture-replay\n- release-smoke" },
+        { title: "Versioning", code: "v1.1.0-rc.1 -> v1.1.0\nUse Conventional Commits for feat/fix/docs" },
+        { title: "Rollback", code: "1) set MEMORY_ENCRYPTION_MODE=compat\n2) restore latest backup snapshot\n3) restart memoryfeed serve\n4) verify /readyz + /metrics" },
+      ],
+      checklist: [
+        "Keep PRODUCTION.md, MONITORING.md, BACKUP_STRATEGY.md updated with every release.",
+        "Publish clear changelog with breaking/non-breaking notes.",
+        "Run rollback drill before enabling public mode.",
       ],
     },
     {
