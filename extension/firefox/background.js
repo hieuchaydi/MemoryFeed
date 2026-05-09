@@ -1,6 +1,8 @@
 const API_BASE = "http://localhost:7749";
 const BADGE_KEY = "memoryfeed_captured_today";
 const DATE_KEY = "memoryfeed_badge_date";
+const OUTBOX_KEY = "memoryfeed_capture_outbox";
+const OUTBOX_LIMIT = 200;
 const ext = typeof browser !== "undefined" ? browser : chrome;
 
 async function postCapture(payload) {
@@ -62,13 +64,53 @@ async function syncBadgeFromBackend() {
   }
 }
 
+async function getOutbox() {
+  const data = await ext.storage.local.get([OUTBOX_KEY]);
+  const rows = data[OUTBOX_KEY];
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function enqueueOutbox(payload, reason) {
+  const rows = await getOutbox();
+  rows.push({
+    payload,
+    reason: String(reason || "unknown"),
+    created_at: new Date().toISOString(),
+    attempts: 0,
+  });
+  const trimmed = rows.slice(-OUTBOX_LIMIT);
+  await ext.storage.local.set({ [OUTBOX_KEY]: trimmed });
+}
+
+async function flushOutbox(limit = 20) {
+  const rows = await getOutbox();
+  if (!rows.length) return;
+  let sent = 0;
+  const next = [];
+  for (const row of rows.slice(0, OUTBOX_LIMIT)) {
+    if (sent >= limit) {
+      next.push(row);
+      continue;
+    }
+    try {
+      await postCapture(row.payload);
+      sent += 1;
+    } catch (_) {
+      next.push({ ...row, attempts: Math.min(999, Number(row.attempts || 0) + 1) });
+    }
+  }
+  await ext.storage.local.set({ [OUTBOX_KEY]: next });
+}
+
 ext.runtime.onInstalled.addListener(() => {
   syncBadgeFromBackend();
+  void flushOutbox(30);
 });
 
 if (ext.runtime.onStartup) {
   ext.runtime.onStartup.addListener(() => {
     syncBadgeFromBackend();
+    void flushOutbox(30);
   });
 }
 
@@ -81,9 +123,11 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await incrementBadge();
       }
       sendResponse({ ok: true, data });
+      void flushOutbox(10);
     })
     .catch((error) => {
       console.debug("MemoryFeed backend unavailable:", error);
+      void enqueueOutbox(message.payload, error);
       sendResponse({ ok: false, error: String(error) });
     });
 

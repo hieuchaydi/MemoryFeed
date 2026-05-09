@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.retention import compute_decay
+from backend.db_connection import connect_db
 from backend.runtime_config import load_runtime_config
 
 
@@ -38,7 +39,7 @@ class MemoryLifecycleEngine:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn = connect_db(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 

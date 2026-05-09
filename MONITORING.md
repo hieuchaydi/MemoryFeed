@@ -1,8 +1,8 @@
 # MONITORING.md
 
 ## Endpoints
-- `/healthz`: liveness.
-- `/readyz`: readiness (queues + provider breaker states).
+- `/healthz`: liveness + DB connectivity probe.
+- `/readyz`: readiness (queues + provider breaker states + DB connectivity).
 - `/metrics`: Prometheus-compatible text metrics.
 - `/api/perf`: detailed runtime diagnostics.
 
@@ -10,6 +10,7 @@
 - queue size (`indexer`, `vision`)
 - retry counters and dead-letter counts
 - provider circuit breaker state (`open`/`closed`)
+- DB encryption/runtime status (`db_encryption`)
 - search latency and cache hit ratio (from `/api/perf`)
 
 ## Alert Suggestions

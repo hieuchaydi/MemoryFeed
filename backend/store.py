@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.memory_graph import derive_graph_fields
+from backend.db_connection import connect_db
 from backend.noise import classify_noise
 from backend.crypto_at_rest import AtRestCrypto
 from backend.retention import compute_decay
@@ -41,9 +42,19 @@ class Store:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn = connect_db(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def ping(self) -> bool:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT 1 as ok").fetchone()
+            return bool(row and int(row["ok"]) == 1)
+        except Exception:
+            return False
+        finally:
+            conn.close()
 
     def _maybe_encrypt_text(self, value: Any, aad: bytes) -> str | None:
         if value is None:

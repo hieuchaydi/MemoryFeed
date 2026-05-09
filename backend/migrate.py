@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from backend.db_connection import connect_db
 
 DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"))).expanduser()
 DB_PATH = DATA_DIR / "memoryfeed.db"
@@ -98,7 +99,7 @@ def run_migrations_on_connection(conn: sqlite3.Connection, target_version: int |
 def run_migrations(db_path: Path | None = None, target_version: int | None = None) -> dict[str, Any]:
     db_file = db_path or DB_PATH
     db_file.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_file)
+    conn = connect_db(db_file, check_same_thread=False)
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")

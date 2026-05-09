@@ -13,7 +13,16 @@
 ## Encryption Cutover
 1. Start in `compat` mode.
 2. Run `memoryfeed encrypt-migrate --limit 5000` until `updated=0`.
-3. Restart with `MEMORY_ENCRYPTION_MODE=strict`.
+3. Run media cutover: `POST /api/admin/encryption/migrate-media`.
+4. Restart with `MEMORY_ENCRYPTION_MODE=strict`.
+
+## Optional SQLCipher
+- Enable file-level DB encryption:
+  - `MEMORY_SQLCIPHER_ENABLED=1`
+  - `MEMORY_SQLCIPHER_KEY=<strong passphrase>`
+- Runtime status is exposed at:
+  - `/api/stats` -> `db_encryption`
+  - `/readyz` -> `db_encryption`
 
 ## Operational Limits
 - API rate limit defaults: 120 req/60s per client+path.

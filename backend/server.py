@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.capture import normalize_capture
 from backend.crypto_at_rest import AtRestCrypto
+from backend.db_connection import sqlcipher_status
 from backend.debug import explain_archival_decision, explain_confidence_reduction, explain_duplicate_decision
 from backend.import_export import export_payload, import_payload
 from backend.indexer import IndexerService
@@ -426,6 +427,7 @@ async def stats_api() -> dict[str, Any]:
         "provider": crypto.state.provider,
         "algorithm": getattr(crypto, "_algo", "unknown"),
     }
+    payload["db_encryption"] = sqlcipher_status()
     cfg = load_runtime_config()
     guard = verify_local_only_mode(cfg)
     payload["privacy_guard"] = {
@@ -630,8 +632,9 @@ async def reset_data_api(
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+async def healthz() -> dict[str, Any]:
+    db_ok = await asyncio.to_thread(store.ping)
+    return {"status": "ok" if db_ok else "degraded", "db_ok": db_ok}
 
 
 @app.get("/api/images/{name}")
@@ -655,14 +658,17 @@ async def encrypted_image_proxy(name: str) -> Response:
 async def readyz() -> dict[str, Any]:
     index_status = indexer.status()
     vision_status = vision.status()
-    ready = bool(index_status.get("running")) and bool(vision_status.get("running"))
+    db_ok = await asyncio.to_thread(store.ping)
+    ready = bool(index_status.get("running")) and bool(vision_status.get("running")) and bool(db_ok)
     return {
         "ready": ready,
+        "db_ok": db_ok,
         "queues": {
             "indexer": index_status,
             "vision": vision_status,
         },
         "providers": provider_runtime_state(),
+        "db_encryption": sqlcipher_status(),
     }
 
 
