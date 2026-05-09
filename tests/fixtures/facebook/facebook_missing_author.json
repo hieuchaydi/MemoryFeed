@@ -1,0 +1,15 @@
+{
+  "platform": "facebook",
+  "url": "https://www.facebook.com/alice/posts/222",
+  "canonical_url": "https://www.facebook.com/alice/posts/222",
+  "text_content": "Facebook post without author",
+  "author_name": null,
+  "author_handle": null,
+  "media_urls": [
+    "https://cdn.example.com/fb-2.jpg"
+  ],
+  "quality_flags": [
+    "missing_author_name"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

@@ -16,6 +16,7 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from backend.extractor_replay import replay_fixture, test_platform_fixtures
+from backend.import_export import build_export_payload, import_payload
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
 from backend.llm_clients import (
@@ -153,12 +154,20 @@ def migrate_command(target_version: int | None) -> None:
 @click.argument("fixture_html", type=click.Path(exists=True, dir_okay=False))
 @click.option("--expected", "expected_snapshot", default=None, help="Optional expected snapshot JSON")
 @click.option("--json-output", is_flag=True, help="Print JSON output")
-def replay_command(fixture_html: str, expected_snapshot: str | None, json_output: bool) -> None:
+@click.option("--deterministic", is_flag=True, help="Use fixed timestamp and stable ordering for replay output")
+def replay_command(
+    fixture_html: str,
+    expected_snapshot: str | None,
+    json_output: bool,
+    deterministic: bool,
+) -> None:
     """Replay extractor against saved fixture HTML."""
-    result = replay_fixture(fixture_html, expected_snapshot=expected_snapshot)
+    result = replay_fixture(fixture_html, expected_snapshot=expected_snapshot, deterministic=deterministic)
     payload = {
         "fixture": result.fixture,
         "platform": result.platform,
+        "deterministic": result.deterministic,
+        "replay_timestamp": result.replay_timestamp,
         "extracted": result.extracted,
         "selector_used": result.selector_used,
         "missing_fields": result.missing_fields,
@@ -187,9 +196,10 @@ def extractor_group() -> None:
 @extractor_group.command("test")
 @click.argument("platform", type=click.Choice(["facebook", "twitter", "youtube", "linkedin", "tiktok"], case_sensitive=False))
 @click.option("--json-output", is_flag=True, help="Print JSON output")
-def extractor_test_command(platform: str, json_output: bool) -> None:
+@click.option("--deterministic", is_flag=True, help="Use fixed timestamp and stable ordering")
+def extractor_test_command(platform: str, json_output: bool, deterministic: bool) -> None:
     """Run fixture-based extractor tests by platform."""
-    report = test_platform_fixtures(platform.lower())
+    report = test_platform_fixtures(platform.lower(), deterministic=deterministic)
     if json_output:
         console.print_json(json.dumps(report, ensure_ascii=False))
         return
@@ -370,12 +380,12 @@ def stats() -> None:
 def export(out_file: str | None) -> None:
     """Export all data to JSON."""
     store = Store()
-    items = store.export_items()
+    payload = build_export_payload(store)
     export_dir = DATA_DIR / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
     target = Path(out_file) if out_file else export_dir / f"memoryfeed-export-{date.today().isoformat()}.json"
-    target.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
-    console.print(f"[green]Exported {len(items)} items to {target}[/green]")
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    console.print(f"[green]Exported {len(payload.get('items', []))} items to {target}[/green]")
 
 
 @cli.command(name="import")
@@ -387,17 +397,11 @@ def import_items(in_file: str) -> None:
         console.print(f"[red]File not found: {path}[/red]")
         sys.exit(1)
     payload = json.loads(path.read_text(encoding="utf-8"))
-    items = payload.get("items", [])
     store = Store()
-    inserted = 0
-    duplicates = 0
-    for item in items:
-        ok, _ = store.insert_item(item)
-        if ok:
-            inserted += 1
-        else:
-            duplicates += 1
-    console.print(f"[green]Import done.[/green] inserted={inserted}, duplicates={duplicates}")
+    report = import_payload(store, payload)
+    console.print(
+        f"[green]Import done.[/green] inserted={report['inserted']}, duplicates={report['duplicates']}, invalid={report['invalid']}"
+    )
 
 
 @cli.command()

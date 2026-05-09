@@ -1,0 +1,13 @@
+{
+  "platform": "twitter",
+  "url": "https://x.com/bob/status/9003",
+  "canonical_url": "https://x.com/bob/status/9003",
+  "text_content": "Nested tweet no media",
+  "author_name": "Bob X",
+  "author_handle": null,
+  "media_urls": [],
+  "quality_flags": [
+    "missing_media_urls"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

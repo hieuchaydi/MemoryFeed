@@ -29,9 +29,19 @@ def configure_logging() -> None:
     if _CONFIGURED:
         return
 
-    log_level_name = os.getenv("MEMORYFEED_LOG_LEVEL", "INFO").upper()
+    log_level_name = os.getenv("MEMORY_LOG_LEVEL", os.getenv("MEMORYFEED_LOG_LEVEL", "INFO")).upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
     log_format = os.getenv("MEMORYFEED_LOG_FORMAT", "plain").lower()
+    try:
+        max_mb = int(os.getenv("MEMORY_LOG_MAX_MB", "50").strip())
+    except Exception:
+        max_mb = 50
+    max_mb = max(5, min(500, max_mb))
+    try:
+        rotation_count = int(os.getenv("MEMORY_LOG_ROTATION_COUNT", "5").strip())
+    except Exception:
+        rotation_count = 5
+    rotation_count = max(1, min(50, rotation_count))
 
     logs_dir = DATA_DIR / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -48,7 +58,12 @@ def configure_logging() -> None:
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
 
-    file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=max_mb * 1024 * 1024,
+        backupCount=rotation_count,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()

@@ -1,0 +1,15 @@
+{
+  "platform": "twitter",
+  "url": "https://x.com/alice/status/9002",
+  "canonical_url": "https://x.com/alice/status/9002",
+  "text_content": "Tweet without author",
+  "author_name": null,
+  "author_handle": null,
+  "media_urls": [
+    "https://pbs.twimg.com/media/def.jpg"
+  ],
+  "quality_flags": [
+    "missing_author_name"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

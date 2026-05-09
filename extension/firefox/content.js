@@ -1,10 +1,54 @@
 (() => {
-  const MIN_DWELL_MS = 3000;
-  const TIKTOK_DWELL_MS = 1800;
+  const MIN_DWELL_MS = 800;
+  const TIKTOK_DWELL_MS = 600;
+  const CAPTURE_DEBOUNCE_MS_DEFAULT = 300;
+  const CAPTURE_MAX_ATTEMPTS_PER_MINUTE_DEFAULT = 200;
   const ext = typeof browser !== "undefined" ? browser : chrome;
   const visibilityMap = new Map();
   const capturedKeys = new Set();
   const capturedElements = new WeakSet();
+  const nodeAttemptMap = new WeakMap();
+  const captureAttemptTimeline = [];
+  const cleanupRegistry = {
+    observers: new Set(),
+    intervals: new Set(),
+    timeouts: new Set(),
+    listeners: [],
+  };
+  const captureRuntime = {
+    minVisibleMs: MIN_DWELL_MS,
+    debounceMs: CAPTURE_DEBOUNCE_MS_DEFAULT,
+    maxAttemptsPerMinute: CAPTURE_MAX_ATTEMPTS_PER_MINUTE_DEFAULT,
+  };
+  const TRACKING_QUERY_KEYS = new Set([
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+    "gclid",
+    "fbclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "ref",
+    "ref_src",
+  ]);
+  const SENSITIVE_QUERY_KEYS = new Set([
+    "session",
+    "sessionid",
+    "sid",
+    "phpsessid",
+    "jsessionid",
+    "token",
+    "auth",
+    "authorization",
+    "bearer",
+    "api_key",
+    "apikey",
+    "key",
+  ]);
 
   const platform = detectPlatform(window.location.hostname);
 
@@ -109,21 +153,51 @@
     return value.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim());
   }
 
-  function normalizeConfig(raw, fallbackCfg) {
-    const fallback = raw?.fallback_selectors || {};
+  function warn(message) {
+    try {
+      console.warn(`[MemoryFeed] ${message}`);
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  function normalizeConfig(raw, fallbackCfg, platformName) {
+    if (!raw || typeof raw !== "object") {
+      warn(`selector config for ${platformName} is invalid, using defaults`);
+      return JSON.parse(JSON.stringify(fallbackCfg));
+    }
+    if (typeof raw.platform === "string" && raw.platform.trim()) {
+      const normalizedPlatform = raw.platform.trim().toLowerCase();
+      if (normalizedPlatform !== platformName) {
+        warn(`selector config platform mismatch for ${platformName}, using defaults`);
+        return JSON.parse(JSON.stringify(fallbackCfg));
+      }
+    }
+
+    const fallback = raw?.fallback_selectors && typeof raw.fallback_selectors === "object" ? raw.fallback_selectors : {};
+    const candidate = typeof raw?.candidate_selector === "string" && raw.candidate_selector.trim() ? raw.candidate_selector.trim() : "";
+    if (!candidate) {
+      warn(`selector config missing candidate_selector for ${platformName}, using defaults`);
+      return JSON.parse(JSON.stringify(fallbackCfg));
+    }
+
     return {
-      candidate: typeof raw?.candidate_selector === "string" && raw.candidate_selector.trim() ? raw.candidate_selector.trim() : fallbackCfg.candidate,
+      candidate,
       text: normalizeArray(raw?.text_selectors).length ? normalizeArray(raw?.text_selectors) : fallbackCfg.text,
       authorName: normalizeArray(raw?.author_selectors).length ? normalizeArray(raw?.author_selectors) : fallbackCfg.authorName,
       authorHandle: normalizeArray(raw?.author_handle_selectors).length ? normalizeArray(raw?.author_handle_selectors) : fallbackCfg.authorHandle,
       url: normalizeArray(raw?.canonical_url_selectors).length ? normalizeArray(raw?.canonical_url_selectors) : fallbackCfg.url,
       media: normalizeArray(raw?.media_selectors).length ? normalizeArray(raw?.media_selectors) : fallbackCfg.media,
+      extractorVersion:
+        typeof raw?.extractor_version === "string" && raw.extractor_version.trim()
+          ? raw.extractor_version.trim().slice(0, 80)
+          : `${platformName}_v3_1`,
       fallback: {
-        text: normalizeArray(fallback?.text),
-        authorName: normalizeArray(fallback?.author_name),
-        authorHandle: normalizeArray(fallback?.author_handle),
-        url: normalizeArray(fallback?.canonical_url),
-        media: normalizeArray(fallback?.media)
+        text: normalizeArray(fallback?.text).length ? normalizeArray(fallback?.text) : fallbackCfg.fallback.text,
+        authorName: normalizeArray(fallback?.author_name).length ? normalizeArray(fallback?.author_name) : fallbackCfg.fallback.authorName,
+        authorHandle: normalizeArray(fallback?.author_handle).length ? normalizeArray(fallback?.author_handle) : fallbackCfg.fallback.authorHandle,
+        url: normalizeArray(fallback?.canonical_url).length ? normalizeArray(fallback?.canonical_url) : fallbackCfg.fallback.url,
+        media: normalizeArray(fallback?.media).length ? normalizeArray(fallback?.media) : fallbackCfg.fallback.media
       }
     };
   }
@@ -145,7 +219,86 @@
       const raw = await loadSelectorJson(name);
       if (!raw) continue;
       const fallbackCfg = DEFAULT_CONFIG[name] || DEFAULT_CONFIG.unknown;
-      CONFIG[name] = normalizeConfig(raw, fallbackCfg);
+      CONFIG[name] = normalizeConfig(raw, fallbackCfg, name);
+    }
+  }
+
+  function registerObserver(instance) {
+    cleanupRegistry.observers.add(instance);
+    return instance;
+  }
+
+  function registerInterval(instance) {
+    cleanupRegistry.intervals.add(instance);
+    return instance;
+  }
+
+  function registerTimeout(instance) {
+    cleanupRegistry.timeouts.add(instance);
+    return instance;
+  }
+
+  function registerListener(target, name, handler, options) {
+    target.addEventListener(name, handler, options);
+    cleanupRegistry.listeners.push([target, name, handler, options]);
+  }
+
+  function clearAllRuntime() {
+    for (const [el, state] of visibilityMap.entries()) {
+      clearTimeout(state.timer);
+      visibilityMap.delete(el);
+    }
+    for (const observerInstance of cleanupRegistry.observers) {
+      try {
+        observerInstance.disconnect();
+      } catch (_) {
+        // no-op
+      }
+    }
+    cleanupRegistry.observers.clear();
+
+    for (const intervalId of cleanupRegistry.intervals) {
+      clearInterval(intervalId);
+    }
+    cleanupRegistry.intervals.clear();
+
+    for (const timeoutId of cleanupRegistry.timeouts) {
+      clearTimeout(timeoutId);
+    }
+    cleanupRegistry.timeouts.clear();
+
+    for (const [target, name, handler, options] of cleanupRegistry.listeners) {
+      try {
+        target.removeEventListener(name, handler, options);
+      } catch (_) {
+        // no-op
+      }
+    }
+    cleanupRegistry.listeners = [];
+    for (const node of document.querySelectorAll('[data-memoryfeed-observed=\"1\"]')) {
+      delete node.dataset.memoryfeedObserved;
+    }
+    observer = null;
+  }
+
+  async function loadCaptureRuntimeConfig() {
+    if (!ext.storage || !ext.storage.local || !ext.storage.local.get) return;
+    try {
+      const raw = await ext.storage.local.get([
+        "MEMORY_CAPTURE_MIN_VISIBLE_MS",
+        "MEMORY_CAPTURE_DEBOUNCE_MS",
+        "MEMORY_CAPTURE_MAX_ATTEMPTS_PER_MINUTE",
+      ]);
+      const minVisible = Number(raw.MEMORY_CAPTURE_MIN_VISIBLE_MS);
+      const debounceMs = Number(raw.MEMORY_CAPTURE_DEBOUNCE_MS);
+      const maxAttempts = Number(raw.MEMORY_CAPTURE_MAX_ATTEMPTS_PER_MINUTE);
+      if (Number.isFinite(minVisible) && minVisible > 0) captureRuntime.minVisibleMs = Math.max(200, Math.round(minVisible));
+      if (Number.isFinite(debounceMs) && debounceMs > 0) captureRuntime.debounceMs = Math.max(50, Math.round(debounceMs));
+      if (Number.isFinite(maxAttempts) && maxAttempts > 0) {
+        captureRuntime.maxAttemptsPerMinute = Math.max(20, Math.round(maxAttempts));
+      }
+    } catch (_) {
+      // keep defaults
     }
   }
 
@@ -157,10 +310,7 @@
     }
   });
 
-  const observer = new IntersectionObserver(onIntersect, {
-    root: null,
-    threshold: [0.25, 0.5, 0.75]
-  });
+  let observer = null;
 
   function detectPlatform(hostname) {
     const host = (hostname || "").toLowerCase();
@@ -173,7 +323,8 @@
   }
 
   function minDwellMsForPlatform() {
-    return platform === "tiktok" ? TIKTOK_DWELL_MS : MIN_DWELL_MS;
+    if (platform === "tiktok") return Math.max(TIKTOK_DWELL_MS, Math.round(captureRuntime.minVisibleMs * 0.6));
+    return captureRuntime.minVisibleMs;
   }
 
   function getPlatformConfig() {
@@ -204,16 +355,40 @@
   function observeOne(el) {
     if (!(el instanceof Element)) return;
     if (el.dataset.memoryfeedObserved === "1") return;
+    if (!observer) return;
     el.dataset.memoryfeedObserved = "1";
     observer.observe(el);
   }
 
-  async function maybeCapture(el, startMs) {
+  function allowCaptureAttempt(el) {
+    const now = Date.now();
+    const attemptState = nodeAttemptMap.get(el);
+    if (attemptState && now - attemptState.lastAttemptMs < captureRuntime.debounceMs) {
+      return false;
+    }
+
+    while (captureAttemptTimeline.length && now - captureAttemptTimeline[0] > 60_000) {
+      captureAttemptTimeline.shift();
+    }
+    if (captureAttemptTimeline.length >= captureRuntime.maxAttemptsPerMinute) {
+      return false;
+    }
+
+    captureAttemptTimeline.push(now);
+    nodeAttemptMap.set(el, {
+      lastAttemptMs: now,
+      attempts: attemptState ? attemptState.attempts + 1 : 1,
+    });
+    return true;
+  }
+
+  async function maybeCapture(el, startMs, captureMethod = "intersection_observer") {
     const dwellMs = Date.now() - startMs;
     if (dwellMs < minDwellMsForPlatform()) return;
     if (platform !== "tiktok" && capturedElements.has(el)) return;
+    if (!allowCaptureAttempt(el)) return;
 
-    const payload = await capturePost(el, platform, dwellMs / 1000);
+    const payload = await capturePost(el, platform, dwellMs / 1000, captureMethod);
     if (!payload || !payload.url) return;
 
     const bucket = Math.floor(Date.now() / (2 * 60 * 60 * 1000));
@@ -241,9 +416,11 @@
       if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
         if (!visibilityMap.has(el)) {
           const startedAt = Date.now();
-          const timer = setTimeout(() => {
-            void maybeCapture(el, startedAt);
-          }, minDwellMsForPlatform() + 100);
+          const timer = registerTimeout(
+            setTimeout(() => {
+              void maybeCapture(el, startedAt, "intersection_observer");
+            }, minDwellMsForPlatform() + 100)
+          );
           visibilityMap.set(el, { startedAt, timer });
         }
       } else {
@@ -251,15 +428,14 @@
         if (state) {
           visibilityMap.delete(el);
           clearTimeout(state.timer);
-          void maybeCapture(el, state.startedAt);
         }
       }
     }
   }
 
-  async function capturePost(element, detectedPlatform, dwellSeconds) {
+  async function capturePost(element, detectedPlatform, dwellSeconds, captureMethod) {
     try {
-      return extractByPlatform(element, detectedPlatform, dwellSeconds);
+      return extractByPlatform(element, detectedPlatform, dwellSeconds, captureMethod);
     } catch (error) {
       console.debug("MemoryFeed capture error:", error);
       return null;
@@ -395,9 +571,12 @@
     parsed.hash = "";
     const host = parsed.hostname.replace(/^www\./, "");
     const params = new URLSearchParams(parsed.search);
-    ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid", "igshid", "si"].forEach((k) => {
-      params.delete(k);
-    });
+    const clean = new URLSearchParams();
+    for (const [key, value] of params.entries()) {
+      const lower = key.toLowerCase();
+      if (TRACKING_QUERY_KEYS.has(lower) || SENSITIVE_QUERY_KEYS.has(lower)) continue;
+      clean.append(key, value);
+    }
 
     if (platformName === "twitter") {
       const match = parsed.pathname.match(/^\/([^/]+)\/status\/(\d+)/);
@@ -411,31 +590,48 @@
         if (videoId) {
           parsed.hostname = "youtube.com";
           parsed.pathname = "/watch";
-          parsed.search = `?v=${encodeURIComponent(videoId)}`;
+          clean.set("v", videoId);
         }
-      } else if (parsed.pathname === "/watch") {
-        const v = params.get("v");
-        parsed.search = v ? `?v=${encodeURIComponent(v)}` : "";
+      }
+      if (parsed.pathname === "/watch") {
+        const keep = new URLSearchParams();
+        const v = clean.get("v");
+        if (v) keep.set("v", v);
+        const t = clean.get("t") || clean.get("start") || clean.get("time_continue");
+        if (t) keep.set("t", t);
+        const list = clean.get("list");
+        if (list) keep.set("list", list);
+        const index = clean.get("index");
+        if (index) keep.set("index", index);
+        parsed.search = keep.toString() ? `?${keep.toString()}` : "";
       } else if (parsed.pathname.startsWith("/shorts/")) {
         const shortId = parsed.pathname.split("/shorts/")[1]?.split("/")[0];
         parsed.pathname = shortId ? `/shorts/${shortId}` : "/shorts";
-        parsed.search = "";
+        const keep = new URLSearchParams();
+        const t = clean.get("t");
+        if (t) keep.set("t", t);
+        parsed.search = keep.toString() ? `?${keep.toString()}` : "";
       }
     } else if (platformName === "linkedin") {
       const match = parsed.pathname.match(/^\/feed\/update\/([^/?#]+)/);
       if (match) {
         parsed.pathname = `/feed/update/${match[1]}`;
       }
-      parsed.search = "";
+      parsed.search = clean.toString() ? `?${clean.toString()}` : "";
     } else if (platformName === "facebook") {
       if (parsed.pathname.includes("/posts/") || parsed.pathname.includes("/permalink/")) {
-        parsed.search = "";
+        const keep = new URLSearchParams();
+        const commentId = clean.get("comment_id");
+        if (commentId) keep.set("comment_id", commentId);
+        parsed.search = keep.toString() ? `?${keep.toString()}` : "";
       } else {
-        const story = params.get("story_fbid");
-        const id = params.get("id");
+        const story = clean.get("story_fbid");
+        const id = clean.get("id");
         const keep = new URLSearchParams();
         if (story) keep.set("story_fbid", story);
         if (id) keep.set("id", id);
+        const commentId = clean.get("comment_id");
+        if (commentId) keep.set("comment_id", commentId);
         parsed.search = keep.toString() ? `?${keep.toString()}` : "";
       }
     } else if (platformName === "tiktok") {
@@ -443,9 +639,12 @@
       if (match) {
         parsed.pathname = `/@${match[1]}/video/${match[2]}`;
       }
-      parsed.search = "";
+      const keep = new URLSearchParams();
+      const index = clean.get("index") || clean.get("i");
+      if (index) keep.set("index", index);
+      parsed.search = keep.toString() ? `?${keep.toString()}` : "";
     } else {
-      parsed.search = params.toString() ? `?${params.toString()}` : "";
+      parsed.search = clean.toString() ? `?${clean.toString()}` : "";
     }
 
     parsed.hostname = host;
@@ -488,7 +687,48 @@
     return mediaUrls.length ? "image" : "post";
   }
 
-  function extractByPlatform(element, platformName, dwellSeconds) {
+  function computeConfidence(requiredFields, qualityFlags, selectorUsed) {
+    let score = 1.0;
+    const reasons = [];
+    if (!requiredFields.text) {
+      score -= 0.22;
+      reasons.push("missing_text");
+    }
+    if (!requiredFields.author_name) {
+      score -= 0.14;
+      reasons.push("missing_author");
+    }
+    if (!requiredFields.canonical_url) {
+      score -= 0.18;
+      reasons.push("missing_canonical_url");
+    }
+    if (!requiredFields.post_id) {
+      score -= 0.08;
+      reasons.push("missing_post_id");
+    }
+    if (!Array.isArray(requiredFields.media_urls) || requiredFields.media_urls.length === 0) {
+      score -= 0.08;
+      reasons.push("missing_media");
+    }
+    if ((qualityFlags || []).some((flag) => String(flag).startsWith("missing_"))) {
+      score -= 0.05;
+      reasons.push("missing_required_fields");
+    }
+    for (const [key, value] of Object.entries(selectorUsed || {})) {
+      if (typeof value === "string" && value.startsWith("fallback")) {
+        score -= 0.04;
+        reasons.push(`fallback_selector_used:${key}`);
+      }
+    }
+    if (score < 0) score = 0;
+    if (score > 1) score = 1;
+    return {
+      score: Math.round(score * 10000) / 10000,
+      reasons: [...new Set(reasons)].sort(),
+    };
+  }
+
+  function extractByPlatform(element, platformName, dwellSeconds, captureMethod) {
     const cfg = CONFIG[platformName] || CONFIG.unknown;
     const fallback = cfg.fallback || {};
     const roots = [element, document];
@@ -528,6 +768,14 @@
       .map(([key]) => key);
 
     const qualityFlags = missingFields.map((field) => `missing_${field}`);
+    const selectorUsed = {
+      text: textData.selector || "fallback:meta/doctype",
+      author_name: authorNameData.selector || "fallback:none",
+      author_handle: authorHandleData.selector || "fallback:none",
+      canonical_url: urlData.selector || "fallback:canonical/window.location",
+      media_urls: mediaData.selectors
+    };
+    const confidence = computeConfidence(requiredFields, qualityFlags, selectorUsed);
 
     return {
       url: canonicalUrl || window.location.href,
@@ -544,55 +792,111 @@
       thumbnail_url: thumbnailUrl,
       source_context: window.location.pathname,
       quality_flags: qualityFlags,
-      capture_debug: {
-        selector_used: {
-          text: textData.selector || "fallback:meta/doctype",
-          author_name: authorNameData.selector || "fallback:none",
-          author_handle: authorHandleData.selector || "fallback:none",
-          canonical_url: urlData.selector || "fallback:canonical/window.location",
-          media_urls: mediaData.selectors
-        },
+      capture_confidence: confidence.score,
+      confidence_reasons: confidence.reasons,
+      capture_method: captureMethod || "mutation_observer",
+      extractor_version: cfg.extractorVersion || `${platformName}_v3_1`,
+      capture_source: "timeline_scroll",
+      replay_source: null,
+        capture_debug: {
+        selector_used: selectorUsed,
         missing_fields: missingFields,
-        page_url: window.location.href
+        page_url: `${window.location.origin}${window.location.pathname}`
       },
       dwell_seconds: dwellSeconds,
       captured_at: new Date().toISOString()
     };
   }
 
-  const mutationObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node instanceof Element) observeCandidates(node);
-      }
+  function routeReinitialize() {
+    for (const [el, state] of visibilityMap.entries()) {
+      clearTimeout(state.timer);
+      visibilityMap.delete(el);
     }
-  });
-
-  observeCandidates(document);
-  void loadSelectorRegistry().then(() => {
+    for (const node of document.querySelectorAll('[data-memoryfeed-observed=\"1\"]')) {
+      delete node.dataset.memoryfeedObserved;
+    }
+    capturedKeys.clear();
     observeCandidates(document);
-  });
-  mutationObserver.observe(document.body, { childList: true, subtree: true });
-
-  if (platform === "tiktok") {
-    let lastHref = window.location.href;
-    setInterval(() => {
-      if (window.location.href !== lastHref) {
-        lastHref = window.location.href;
-      }
-      void maybeCapture(document.body, Date.now() - minDwellMsForPlatform() - 200);
-    }, 2500);
   }
 
-  window.addEventListener(
-    "beforeunload",
-    () => {
-      for (const [el, state] of visibilityMap.entries()) {
-        clearTimeout(state.timer);
-        void maybeCapture(el, state.startedAt);
-      }
-      visibilityMap.clear();
-    },
-    { passive: true }
-  );
+  function setupRouteHooks() {
+    if (!window.__memoryfeedRouteHookInstalled) {
+      window.__memoryfeedRouteHookInstalled = true;
+      const wrap = (name) => {
+        const original = history[name];
+        if (typeof original !== "function") return;
+        history[name] = function wrappedHistoryMethod(...args) {
+          const result = original.apply(this, args);
+          window.dispatchEvent(new Event("memoryfeed:route-change"));
+          return result;
+        };
+      };
+      wrap("pushState");
+      wrap("replaceState");
+      window.addEventListener("popstate", () => {
+        window.dispatchEvent(new Event("memoryfeed:route-change"));
+      }, { passive: true });
+    }
+    registerListener(window, "memoryfeed:route-change", routeReinitialize, { passive: true });
+  }
+
+  async function initializeCaptureRuntime() {
+    await loadCaptureRuntimeConfig();
+
+    observer = registerObserver(
+      new IntersectionObserver(onIntersect, {
+        root: null,
+        threshold: [0.25, 0.5, 0.75]
+      })
+    );
+
+    const mutationObserver = registerObserver(
+      new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node instanceof Element) observeCandidates(node);
+          }
+        }
+      })
+    );
+
+    observeCandidates(document);
+    await loadSelectorRegistry();
+    observeCandidates(document);
+
+    if (document.body) {
+      mutationObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (platform === "tiktok") {
+      let lastHref = window.location.href;
+      registerInterval(setInterval(() => {
+        if (window.location.href !== lastHref) {
+          lastHref = window.location.href;
+          routeReinitialize();
+        }
+        void maybeCapture(document.body, Date.now() - minDwellMsForPlatform() - 200, "tiktok_polling");
+      }, 2500));
+    }
+
+    registerListener(
+      window,
+      "beforeunload",
+      () => {
+        clearAllRuntime();
+      },
+      { passive: true }
+    );
+    setupRouteHooks();
+  }
+
+  if (window.__memoryfeedLifecycle && typeof window.__memoryfeedLifecycle.destroy === "function") {
+    window.__memoryfeedLifecycle.destroy("reinitialize");
+  }
+  window.__memoryfeedLifecycle = {
+    destroy: clearAllRuntime,
+  };
+
+  void initializeCaptureRuntime();
 })();

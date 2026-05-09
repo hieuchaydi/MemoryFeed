@@ -42,6 +42,12 @@ def score_item(item: dict[str, Any], mode: str = "default") -> tuple[float, str,
     dwell_bonus = min(0.25, float(item.get("dwell_seconds") or 0.0) / 120.0)
     star_bonus = 0.45 if item.get("starred") else 0.0
     stale_gap = 0.18 if age_days >= 3 and untouched_days >= 14 else 0.0
+    quality_flags = [str(flag) for flag in (item.get("quality_flags") or [])]
+    capture_confidence = float(item.get("capture_confidence", 1.0) or 0.0)
+
+    low_confidence_penalty = max(0.0, 0.7 - capture_confidence) * 0.6
+    missing_fields_penalty = min(0.28, 0.08 * sum(1 for flag in quality_flags if flag.startswith("missing_")))
+    duplicate_risk_penalty = 0.12 if "duplicate_risk" in quality_flags else 0.0
 
     score = (
         heat * 0.45
@@ -52,15 +58,22 @@ def score_item(item: dict[str, Any], mode: str = "default") -> tuple[float, str,
         + star_bonus
         + stale_gap
         + mode_bonus(item, mode)
+        - low_confidence_penalty
+        - missing_fields_penalty
+        - duplicate_risk_penalty
     )
 
     reason = "important_memory"
     if item.get("starred"):
         reason = "starred_memory"
+    elif low_confidence_penalty >= 0.12 or missing_fields_penalty >= 0.12:
+        reason = "low_confidence_capture"
     elif stale_gap:
         reason = "worth_resurfacing"
     elif recency >= 0.85:
         reason = "recent_capture"
 
     needs_review = age_days >= 30 and untouched_days >= 30 and importance < 0.35
+    if capture_confidence < 0.45:
+        needs_review = True
     return score, reason, needs_review

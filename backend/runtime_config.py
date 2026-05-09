@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
 VALID_AI_PROVIDERS = {"none", "gemini", "groq", "auto"}
-LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testclient"}
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,8 @@ class RuntimeConfig:
     mcp_redact_output: bool
     memory_semantic_dedupe: bool
     memory_dedupe_similarity_threshold: float
+    memory_dedupe_window_hours: int
+    memory_platform_dedupe_windows: dict[str, int]
     memory_sanitize_prompt_content: bool
     memory_skip_sensitive_embedding: bool
     memory_retention_days: int
@@ -59,6 +62,34 @@ def env_float(name: str, default: float, min_value: float = 0.0, max_value: floa
     return parsed
 
 
+def env_json_int_map(
+    name: str,
+    *,
+    min_value: int = 1,
+    max_value: int = 24 * 30,
+) -> dict[str, int]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, value in parsed.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            hours = int(value)
+        except Exception:
+            continue
+        hours = max(min_value, min(max_value, hours))
+        out[key.strip().lower()] = hours
+    return out
+
+
 def load_runtime_config() -> RuntimeConfig:
     offline_only = env_flag("OFFLINE_ONLY", default=False)
     ai_provider = (os.getenv("MEMORYFEED_AI_PROVIDER", "auto").strip().lower() or "auto")
@@ -83,6 +114,8 @@ def load_runtime_config() -> RuntimeConfig:
             min_value=0.5,
             max_value=0.999,
         ),
+        memory_dedupe_window_hours=env_int("MEMORY_DEDUPE_WINDOW_HOURS", default=2, min_value=1, max_value=24 * 30),
+        memory_platform_dedupe_windows=env_json_int_map("MEMORY_PLATFORM_DEDUPE_WINDOWS"),
         memory_sanitize_prompt_content=env_flag("MEMORY_SANITIZE_PROMPT_CONTENT", default=True),
         memory_skip_sensitive_embedding=env_flag("MEMORY_SKIP_SENSITIVE_EMBEDDING", default=True),
         memory_retention_days=env_int("MEMORY_RETENTION_DAYS", default=365, min_value=7, max_value=36500),
@@ -127,3 +160,11 @@ def is_localhost_client(client_host: str | None) -> bool:
         return False
     normalized = client_host.split(",", 1)[0].strip().lower()
     return normalized in LOOPBACK_HOSTS
+
+
+def dedupe_window_hours_for_platform(platform: str | None, config: RuntimeConfig | None = None) -> int:
+    cfg = config or load_runtime_config()
+    key = (platform or "").strip().lower()
+    if key and key in cfg.memory_platform_dedupe_windows:
+        return int(cfg.memory_platform_dedupe_windows[key])
+    return int(cfg.memory_dedupe_window_hours)

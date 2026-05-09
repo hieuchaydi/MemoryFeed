@@ -1,0 +1,13 @@
+{
+  "platform": "facebook",
+  "url": "https://www.facebook.com/alice/posts/111?utm_source=feed",
+  "canonical_url": "https://www.facebook.com/alice/posts/111?utm_source=feed",
+  "text_content": "Nested facebook post text",
+  "author_name": "Alice FB",
+  "author_handle": null,
+  "media_urls": [
+    "https://cdn.example.com/fb-1.jpg"
+  ],
+  "quality_flags": [],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

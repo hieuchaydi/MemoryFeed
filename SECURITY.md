@@ -58,6 +58,12 @@ MemoryFeed is local-first: captured memories are stored on the local machine by 
   - explicit admin endpoints
   - reset requires `confirm=RESET`
 - Rotating logs and request-level audit entries
+- Local debug capture endpoint (`/api/debug/capture/latest`) is restricted to localhost clients only
+- Log hardening controls:
+  - `MEMORY_LOG_LEVEL`
+  - `MEMORY_LOG_MAX_MB`
+  - `MEMORY_LOG_ROTATION_COUNT`
+  - sensitive query params are stripped before structured logging
 
 ## Redaction Scope
 
@@ -70,11 +76,12 @@ When MCP redaction is enabled, obvious patterns are masked in outputs:
 
 Redaction is best-effort and pattern-based. It is not a formal DLP system.
 
-## v0.4.0 Safety Notes
+## v0.3.1 Safety Notes
 
 - Suspicious prompt-like content is metadata-flagged, not blocked.
 - MCP sanitization modifies output rendering only; source rows stay local and unchanged.
 - Embedding skip reasons are logged structurally (without raw secret values).
+- Capture provenance/debug metadata excludes raw DOM and avoids full-text logging in info-level events.
 
 ## Operational Guidance
 

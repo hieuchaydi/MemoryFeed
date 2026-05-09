@@ -17,10 +17,16 @@
 - Optional Native C++ Acceleration layer (pybind11)
 
 ## 4) Ingestion Strategy
-- Extension captures content after dwell > 3 seconds.
+- Extension captures content after configurable visibility dwell/debounce/rate-limit thresholds.
 - Normalize capture payload to canonical URL + post id + quality flags before insert.
-- Deduplicate by `canonical_url + normalized_text + author + 2-hour time bucket` fingerprint.
+- Deduplicate by `canonical_url + normalized_text + author + configurable time bucket` fingerprint.
 - `/capture` endpoint returns quickly and never waits for heavy jobs.
+
+## 4.1) Reliability Hardening (v0.3.1)
+- Add centralized lifecycle cleanup in content scripts for observers/intervals/timeouts.
+- Route-change reinitialization is required to avoid orphan observers on SPA feeds.
+- Capture payload includes provenance metadata (`capture_method`, `extractor_version`, `capture_source`) and confidence (`capture_confidence`, `confidence_reasons`).
+- Keep selector registry failures non-fatal: validate schema, warn, and fallback to defaults.
 
 ## 5) Async Processing
 - Vision pipeline (Gemini API) runs in background queue.

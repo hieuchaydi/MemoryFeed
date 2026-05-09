@@ -1,0 +1,13 @@
+{
+  "platform": "linkedin",
+  "url": "https://www.linkedin.com/feed/update/urn:li:activity:1001",
+  "canonical_url": "https://www.linkedin.com/feed/update/urn:li:activity:1001",
+  "text_content": "LinkedIn update text",
+  "author_name": "Alice LI",
+  "author_handle": null,
+  "media_urls": [
+    "https://cdn.example.com/li-1.jpg"
+  ],
+  "quality_flags": [],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

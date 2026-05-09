@@ -17,7 +17,7 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="memoryfeed-migrate-") as tmp:
             db_path = Path(tmp) / "memoryfeed.db"
             report = run_migrations(db_path=db_path)
-            self.assertGreaterEqual(report["after"], 4)
+            self.assertGreaterEqual(report["after"], 5)
             self.assertGreaterEqual(len(report["applied"]), 1)
 
             store = Store(db_path=db_path)

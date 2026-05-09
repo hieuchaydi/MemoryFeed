@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.dedupe import find_semantic_duplicate
+from backend.dedupe import dedupe_bucket, find_semantic_duplicate
 from backend.feed import score_item
 from backend.memory_graph import (
     cluster_id_for_item,
@@ -25,6 +25,7 @@ from backend.ranking import update_item_scores
 from backend.retention import run_retention_policy
 from backend.runtime_config import load_runtime_config
 from backend.safety import detect_prompt_injection
+from backend.url_normalization import canonicalize_url, extract_post_id
 
 DATA_DIR = Path(os.getenv("MEMORYFEED_DATA_DIR", str(Path.home() / ".memoryfeed"))).expanduser()
 DB_PATH = DATA_DIR / "memoryfeed.db"
@@ -155,6 +156,12 @@ class Store:
                 self._ensure_column(conn, "items", "suspicious_prompt_content", "INTEGER DEFAULT 0")
                 self._ensure_column(conn, "items", "safety_signals", "TEXT")
                 self._ensure_column(conn, "items", "archive_reason", "TEXT")
+                self._ensure_column(conn, "items", "capture_confidence", "REAL DEFAULT 0.0")
+                self._ensure_column(conn, "items", "confidence_reasons", "TEXT")
+                self._ensure_column(conn, "items", "capture_method", "TEXT")
+                self._ensure_column(conn, "items", "extractor_version", "TEXT")
+                self._ensure_column(conn, "items", "capture_source", "TEXT")
+                self._ensure_column(conn, "items", "replay_source", "TEXT")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_heat ON items(heat);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_archived_at ON items(archived_at);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_items_canonical_url ON items(canonical_url);")
@@ -251,8 +258,9 @@ class Store:
                         related_topics, related_entities, cluster_id, semantic_group,
                         importance_score, resurfacing_score, recency_score, recurrence_score,
                         ranking_debug, embedding_skipped_reason, suspicious_prompt_content, safety_signals,
-                        archive_reason
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        archive_reason, capture_confidence, confidence_reasons, capture_method,
+                        extractor_version, capture_source, replay_source
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["id"],
@@ -299,6 +307,12 @@ class Store:
                         int(bool(item.get("suspicious_prompt_content", False))),
                         json.dumps(item.get("safety_signals", []), ensure_ascii=False),
                         item.get("archive_reason"),
+                        float(item.get("capture_confidence", 0.0) or 0.0),
+                        json.dumps(item.get("confidence_reasons", []), ensure_ascii=False),
+                        item.get("capture_method"),
+                        item.get("extractor_version"),
+                        item.get("capture_source"),
+                        item.get("replay_source"),
                     ),
                 )
 
@@ -370,13 +384,25 @@ class Store:
         out.setdefault("suspicious_prompt_content", False)
         out.setdefault("safety_signals", [])
 
+        canonical = str(out.get("canonical_url") or out.get("url") or "").strip()
+        platform_name = str(out.get("platform") or "unknown")
+        if canonical:
+            out["canonical_url"] = canonicalize_url(canonical, platform=platform_name) or canonical
+        if not out.get("post_id"):
+            out["post_id"] = extract_post_id(str(out.get("canonical_url") or ""), platform=platform_name)
+        out.setdefault("capture_confidence", 0.0)
+        out.setdefault("confidence_reasons", [])
+        out.setdefault("capture_method", "import")
+        out.setdefault("extractor_version", "legacy")
+        out.setdefault("capture_source", "import")
+        out.setdefault("replay_source", None)
+
         if not out.get("dedupe_key"):
             canonical = out.get("canonical_url") or out.get("url") or ""
             author_name = out.get("author_name") or out.get("author") or ""
             captured_at = out.get("captured_at") or now_iso()
             try:
-                dt = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00")).astimezone(timezone.utc)
-                bucket = str(int(dt.timestamp() // (2 * 60 * 60)))
+                bucket = dedupe_bucket(str(captured_at), platform=str(out.get("platform") or "unknown"))
             except Exception:
                 bucket = str(captured_at)[:13]
             seed = f"{canonical}|{str(out.get('text_content', ''))[:240]}|{author_name[:100]}|{bucket}".encode(
@@ -492,6 +518,14 @@ class Store:
         conn = self._connect()
         try:
             row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+            return self._row_to_item(row) if row else None
+        finally:
+            conn.close()
+
+    def latest_item(self) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM items ORDER BY captured_at DESC, rowid DESC LIMIT 1").fetchone()
             return self._row_to_item(row) if row else None
         finally:
             conn.close()
@@ -764,6 +798,7 @@ class Store:
                     items.resurfacing_score,
                     items.recency_score,
                     items.recurrence_score,
+                    items.capture_confidence,
                     items.suspicious_prompt_content,
                     items.embedding_skipped_reason,
                     bm25(items_fts) AS bm25_score
@@ -998,6 +1033,12 @@ class Store:
             "source_context": row["source_context"] if "source_context" in row.keys() else None,
             "quality_flags": json.loads(row["quality_flags"] or "[]") if "quality_flags" in row.keys() and row["quality_flags"] else [],
             "capture_debug": json.loads(row["capture_debug"] or "{}") if "capture_debug" in row.keys() and row["capture_debug"] else {},
+            "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 0.0,
+            "confidence_reasons": json.loads(row["confidence_reasons"] or "[]") if "confidence_reasons" in row.keys() and row["confidence_reasons"] else [],
+            "capture_method": row["capture_method"] if "capture_method" in row.keys() else None,
+            "extractor_version": row["extractor_version"] if "extractor_version" in row.keys() else None,
+            "capture_source": row["capture_source"] if "capture_source" in row.keys() else None,
+            "replay_source": row["replay_source"] if "replay_source" in row.keys() else None,
             "url_domain": row["url_domain"] if "url_domain" in row.keys() else infer_url_domain(row["canonical_url"] if "canonical_url" in row.keys() else row["url"]),
             "related_topics": json.loads(row["related_topics"] or "[]") if "related_topics" in row.keys() and row["related_topics"] else [],
             "related_entities": json.loads(row["related_entities"] or "[]") if "related_entities" in row.keys() and row["related_entities"] else [],
@@ -1041,6 +1082,7 @@ class Store:
             "resurfacing_score": float(row["resurfacing_score"]) if "resurfacing_score" in row.keys() and row["resurfacing_score"] is not None else 0.0,
             "recency_score": float(row["recency_score"]) if "recency_score" in row.keys() and row["recency_score"] is not None else 0.0,
             "recurrence_score": float(row["recurrence_score"]) if "recurrence_score" in row.keys() and row["recurrence_score"] is not None else 0.0,
+            "capture_confidence": float(row["capture_confidence"]) if "capture_confidence" in row.keys() and row["capture_confidence"] is not None else 0.0,
             "suspicious_prompt_content": bool(row["suspicious_prompt_content"]) if "suspicious_prompt_content" in row.keys() else False,
             "embedding_skipped_reason": row["embedding_skipped_reason"] if "embedding_skipped_reason" in row.keys() else None,
         }

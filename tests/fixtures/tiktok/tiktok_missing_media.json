@@ -1,0 +1,13 @@
+{
+  "platform": "tiktok",
+  "url": "https://www.tiktok.com/@bob/video/1234567892",
+  "canonical_url": "https://www.tiktok.com/@bob/video/1234567892",
+  "text_content": "TikTok no media node",
+  "author_name": "@bob",
+  "author_handle": null,
+  "media_urls": [],
+  "quality_flags": [
+    "missing_media_urls"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

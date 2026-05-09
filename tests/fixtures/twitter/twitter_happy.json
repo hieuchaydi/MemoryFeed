@@ -1,0 +1,13 @@
+{
+  "platform": "twitter",
+  "url": "https://x.com/alice/status/9001?t=abc",
+  "canonical_url": "https://x.com/alice/status/9001?t=abc",
+  "text_content": "X post reliability note",
+  "author_name": "Alice X",
+  "author_handle": null,
+  "media_urls": [
+    "https://pbs.twimg.com/media/abc.jpg"
+  ],
+  "quality_flags": [],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

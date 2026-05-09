@@ -1,29 +1,19 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import uuid
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import urlparse
 
+from backend.capture_quality import compute_capture_confidence
+from backend.dedupe import dedupe_bucket
 from backend.memory_graph import infer_url_domain
 from backend.models import CaptureRequest
 from backend.native_accel import normalize_text_fast
 from backend.safety import detect_prompt_injection
+from backend.url_normalization import canonicalize_url, extract_post_id
 
 MAX_TEXT_LEN = 2000
-TRACKING_QUERY_KEYS = {
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_term",
-    "utm_content",
-    "utm_id",
-    "gclid",
-    "fbclid",
-    "igshid",
-    "si",
-}
 
 PLATFORM_FROM_HOST = {
     "facebook.com": "facebook",
@@ -70,113 +60,6 @@ def detect_content_type(url: str, image_urls: list[str]) -> str:
     return "post"
 
 
-def canonicalize_url(url: str, platform: str = "unknown") -> str:
-    raw = (url or "").strip()
-    if not raw:
-        return ""
-    try:
-        parsed = urlparse(raw)
-    except Exception:
-        return raw
-
-    netloc = parsed.netloc.lower()
-    if netloc.startswith("www."):
-        netloc = netloc[4:]
-
-    query = parse_qs(parsed.query, keep_blank_values=False)
-    query = {k: v for k, v in query.items() if k.lower() not in TRACKING_QUERY_KEYS}
-    path = parsed.path.rstrip("/") or "/"
-
-    if platform == "twitter":
-        match = re.search(r"/([^/]+)/status/(\d+)", path)
-        if match:
-            path = f"/{match.group(1)}/status/{match.group(2)}"
-        query = {}
-    elif platform == "youtube":
-        if "youtu.be" in netloc:
-            video_id = path.strip("/")
-            if video_id:
-                netloc = "youtube.com"
-                path = "/watch"
-                query = {"v": [video_id]}
-        elif path == "/watch":
-            if "v" in query:
-                query = {"v": query["v"][:1]}
-            else:
-                query = {}
-        elif path.startswith("/shorts/"):
-            short_id = path.split("/shorts/", 1)[-1].split("/", 1)[0]
-            path = f"/shorts/{short_id}" if short_id else "/shorts"
-            query = {}
-    elif platform == "linkedin":
-        match = re.search(r"/feed/update/([^/?#]+)", path)
-        if match:
-            path = f"/feed/update/{match.group(1)}"
-        query = {}
-    elif platform == "facebook":
-        if "/permalink/" in path or "/posts/" in path:
-            query = {}
-        else:
-            allowed = {}
-            if "story_fbid" in query:
-                allowed["story_fbid"] = query["story_fbid"][:1]
-            if "id" in query:
-                allowed["id"] = query["id"][:1]
-            query = allowed
-    elif platform == "tiktok":
-        match = re.search(r"/@([^/]+)/video/(\d+)", path)
-        if match:
-            path = f"/@{match.group(1)}/video/{match.group(2)}"
-        query = {}
-
-    clean_query = urlencode([(k, val) for k, values in sorted(query.items()) for val in values], doseq=True)
-    return urlunparse((parsed.scheme or "https", netloc, path, "", clean_query, ""))
-
-
-def extract_post_id(url: str, platform: str = "unknown") -> str | None:
-    if not url:
-        return None
-    parsed = urlparse(url)
-    path = parsed.path or ""
-    query = parse_qs(parsed.query, keep_blank_values=False)
-
-    if platform == "twitter":
-        match = re.search(r"/status/(\d+)", path)
-        return match.group(1) if match else None
-    if platform == "youtube":
-        if path == "/watch":
-            values = query.get("v")
-            return values[0] if values else None
-        if path.startswith("/shorts/"):
-            short_id = path.split("/shorts/", 1)[-1].split("/", 1)[0]
-            return short_id or None
-    if platform == "linkedin":
-        match = re.search(r"/feed/update/([^/?#]+)", path)
-        return match.group(1) if match else None
-    if platform == "facebook":
-        match = re.search(r"/posts/([^/?#]+)", path)
-        if match:
-            return match.group(1)
-        match = re.search(r"/permalink/([^/?#]+)", path)
-        if match:
-            return match.group(1)
-        story = query.get("story_fbid")
-        return story[0] if story else None
-    if platform == "tiktok":
-        match = re.search(r"/video/(\d+)", path)
-        return match.group(1) if match else None
-    return None
-
-
-def _time_bucket(captured_at_iso: str, minutes: int = 120) -> str:
-    try:
-        dt = datetime.fromisoformat(captured_at_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
-    except Exception:
-        dt = datetime.now(timezone.utc)
-    bucket = int(dt.timestamp() // max(60, minutes * 60))
-    return str(bucket)
-
-
 def make_dedupe_key(
     canonical_url: str,
     text: str,
@@ -184,7 +67,7 @@ def make_dedupe_key(
     author_name: str | None = None,
     captured_at_iso: str | None = None,
 ) -> str:
-    bucket = _time_bucket(captured_at_iso or datetime.now(timezone.utc).isoformat())
+    bucket = dedupe_bucket(captured_at_iso or datetime.now(timezone.utc).isoformat(), platform=platform)
     seed = f"{canonical_url}|{platform}|{text[:240]}|{(author_name or '')[:100]}|{bucket}".encode(
         "utf-8",
         errors="ignore",
@@ -227,6 +110,31 @@ def normalize_capture(payload: CaptureRequest) -> dict:
             quality_flags.append(flag)
 
     safety = detect_prompt_injection(text)
+    capture_debug = dict(payload.capture_debug or {})
+    if "missing_fields" not in capture_debug:
+        capture_debug["missing_fields"] = missing_fields
+
+    confidence_score, computed_reasons = compute_capture_confidence(
+        {
+            "url": payload.url.strip(),
+            "canonical_url": canonical_url or payload.url.strip(),
+            "platform": platform,
+            "post_id": post_id,
+            "text_content": text,
+            "media_urls": media_urls,
+            "image_urls": image_urls,
+            "author": author_name,
+            "author_name": author_name,
+            "quality_flags": quality_flags,
+            "capture_debug": capture_debug,
+        }
+    )
+    capture_confidence = (
+        round(float(payload.capture_confidence), 4)
+        if payload.capture_confidence is not None
+        else confidence_score
+    )
+    confidence_reasons = sorted(dict.fromkeys([*computed_reasons, *(payload.confidence_reasons or [])]))
 
     normalized = {
         "id": str(uuid.uuid4()),
@@ -245,7 +153,13 @@ def normalize_capture(payload: CaptureRequest) -> dict:
         "thumbnail_url": payload.thumbnail_url,
         "source_context": payload.source_context,
         "quality_flags": quality_flags,
-        "capture_debug": payload.capture_debug or {},
+        "capture_debug": capture_debug,
+        "capture_confidence": capture_confidence,
+        "confidence_reasons": confidence_reasons,
+        "capture_method": (payload.capture_method or "mutation_observer")[:80],
+        "extractor_version": (payload.extractor_version or f"{platform}_v3_1")[:80],
+        "capture_source": (payload.capture_source or "timeline_scroll")[:120],
+        "replay_source": (payload.replay_source or None),
         "url_domain": infer_url_domain(canonical_url or payload.url.strip()),
         "suspicious_prompt_content": bool(safety["suspicious"]),
         "safety_signals": list(safety["signals"]),

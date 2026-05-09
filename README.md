@@ -4,7 +4,7 @@
 
 MemoryFeed is a local-first social memory system:
 
-- Browser extension captures social posts after 3s dwell.
+- Browser extension captures social posts with configurable visibility dwell/debounce/rate limits.
 - FastAPI backend stores content in SQLite (WAL) + FTS5.
 - LanceDB stores semantic vectors for multilingual search.
 - Optional vision pipeline (Gemini) captions images/memes asynchronously.
@@ -20,6 +20,8 @@ MemoryFeed is a local-first social memory system:
 - Sensitive-content pre-embedding skip (store local, skip vectorization, log reason).
 - Schema migrations (`memoryfeed migrate`), retention/archival foundations, and benchmark snapshot history.
 - Declarative extractor selectors and local replay tooling for DOM regression testing.
+- Capture provenance + confidence metadata (`capture_method`, `extractor_version`, `capture_source`, `capture_confidence`).
+- Local-only debug endpoint for latest capture diagnostics (`/api/debug/capture/latest`).
 
 Local-first by default. Captured data is stored locally. Optional cloud AI providers may process selected text/images only when explicitly configured.
 
@@ -201,6 +203,7 @@ See [SECURITY.md](SECURITY.md) for threat model and mitigations.
 - `GET /api/native/status`
 - `GET /api/queues/status`
 - `GET /api/perf`
+- `GET /api/debug/capture/latest` (localhost-only)
 - `GET /api/items?limit=&offset=&platform=&starred_only=`
 - `PATCH /api/items/{id}`
 - `POST /api/admin/export`
@@ -220,7 +223,9 @@ memoryfeed doctor
 memoryfeed doctor --format json
 memoryfeed search "that angry cat meme last week"
 memoryfeed replay tests/fixtures/twitter_basic.html
+memoryfeed replay tests/fixtures/twitter_basic.html --deterministic
 memoryfeed extractor test twitter
+memoryfeed extractor test twitter --deterministic
 memoryfeed timeline
 memoryfeed feed --mode focus
 memoryfeed resurface "Docker networking CNI overlay Cilium"
@@ -269,13 +274,23 @@ MCP controls:
 Memory intelligence & retention:
 - `MEMORY_SEMANTIC_DEDUPE=true`
 - `MEMORY_DEDUPE_SIMILARITY_THRESHOLD=0.92`
+- `MEMORY_DEDUPE_WINDOW_HOURS=2`
+- `MEMORY_PLATFORM_DEDUPE_WINDOWS='{"twitter":2,"youtube":12}'`
 - `MEMORY_SKIP_SENSITIVE_EMBEDDING=true`
 - `MEMORY_RETENTION_DAYS=365`
 - `MEMORY_AUTO_ARCHIVE=true`
 - `MEMORY_ARCHIVE_LOW_SCORE_THRESHOLD=0.35`
 
+Capture stability:
+- `MEMORY_CAPTURE_MIN_VISIBLE_MS=800`
+- `MEMORY_CAPTURE_DEBOUNCE_MS=300`
+- `MEMORY_CAPTURE_MAX_ATTEMPTS_PER_MINUTE=200`
+
 Logging:
-- `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR`
+- `MEMORY_LOG_LEVEL=info|debug|warning|error`
+- `MEMORY_LOG_MAX_MB=50`
+- `MEMORY_LOG_ROTATION_COUNT=5`
+- `MEMORYFEED_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` (legacy alias)
 - `MEMORYFEED_LOG_FORMAT=plain|json`
 - `MEMORYFEED_LOG_FILE=/custom/path/memoryfeed.log`
 
@@ -300,4 +315,4 @@ Current mapping:
 - `/capture` is non-blocking: vision + embedding run in background queues.
 - Search includes short-TTL response cache with automatic invalidation on new captures.
 - Semantic query vectors use in-memory cache to reduce repeated model encodes.
-- Dedupe fingerprint = canonical URL + normalized text + author + 2-hour time bucket.
+- Dedupe fingerprint = canonical URL + normalized text + author + configurable time bucket.

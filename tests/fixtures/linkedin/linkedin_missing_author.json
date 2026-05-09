@@ -1,0 +1,15 @@
+{
+  "platform": "linkedin",
+  "url": "https://www.linkedin.com/feed/update/urn:li:activity:1002",
+  "canonical_url": "https://www.linkedin.com/feed/update/urn:li:activity:1002",
+  "text_content": "LinkedIn without actor",
+  "author_name": null,
+  "author_handle": null,
+  "media_urls": [
+    "https://cdn.example.com/li-2.jpg"
+  ],
+  "quality_flags": [
+    "missing_author_name"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

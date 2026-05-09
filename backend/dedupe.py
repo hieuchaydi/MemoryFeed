@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from backend.embeddings import build_semantic_text, cosine_similarity, hash_embedding
+from backend.runtime_config import dedupe_window_hours_for_platform
 
 
 @dataclass
@@ -36,6 +37,15 @@ def _parse_iso(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
     except Exception:
         return None
+
+
+def dedupe_bucket(captured_at_iso: str | None, platform: str | None = None) -> str:
+    dt = _parse_iso(captured_at_iso)
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    hours = dedupe_window_hours_for_platform(platform)
+    bucket_seconds = max(60, int(hours) * 60 * 60)
+    return str(int(dt.timestamp() // bucket_seconds))
 
 
 def _candidate_rows(conn, item: dict[str, Any], window_days: int = 180) -> list[dict[str, Any]]:

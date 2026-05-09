@@ -1,0 +1,13 @@
+{
+  "platform": "linkedin",
+  "url": "https://www.linkedin.com/feed/update/urn:li:activity:1003",
+  "canonical_url": "https://www.linkedin.com/feed/update/urn:li:activity:1003",
+  "text_content": "LinkedIn nested content",
+  "author_name": "Bob LI",
+  "author_handle": null,
+  "media_urls": [],
+  "quality_flags": [
+    "missing_media_urls"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

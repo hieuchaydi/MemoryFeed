@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.benchmarking import write_benchmark_snapshot
 from backend.capture import normalize_capture
+from backend.debug import latest_capture_debug_payload
+from backend.import_export import build_export_payload, import_payload
 from backend.indexer import IndexerService
 from backend.interest import InterestEngine
 from backend.logging import log_event
@@ -342,45 +344,51 @@ async def patch_item_api(item_id: str, payload: ItemMetaPatch) -> dict[str, Any]
 
 @app.post("/api/admin/export")
 async def export_data_api(_auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
-    items = await asyncio.to_thread(store.export_items)
+    payload = await asyncio.to_thread(build_export_payload, store)
     export_path = DATA_DIR / "exports"
     export_path.mkdir(parents=True, exist_ok=True)
     target = export_path / f"memoryfeed-export-{date.today().isoformat()}.json"
-    target.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "file": str(target), "count": len(items)}
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "file": str(target), "count": len(payload.get("items", []))}
 
 
 @app.post("/api/admin/import")
 async def import_data_api(payload: ImportPayload, _auth: None = Depends(require_sensitive_access)) -> dict[str, Any]:
-    inserted = 0
-    duplicates = 0
+    report = await asyncio.to_thread(import_payload, store, {"items": payload.items})
     enqueued_vision = 0
     enqueued_index = 0
 
-    for item in payload.items:
-        ok, item_id = await asyncio.to_thread(store.insert_item, item)
-        if ok:
-            inserted += 1
-            if item.get("image_urls"):
-                await vision.enqueue(item["id"])
-                enqueued_vision += 1
-            else:
-                await indexer.enqueue(item["id"])
-                enqueued_index += 1
+    for item_id in report.get("inserted_ids", []):
+        item = await asyncio.to_thread(store.get_item, item_id)
+        if not item:
+            continue
+        if item.get("image_urls"):
+            await vision.enqueue(item_id)
+            enqueued_vision += 1
         else:
-            duplicates += 1
-    if inserted:
+            await indexer.enqueue(item_id)
+            enqueued_index += 1
+    if report["inserted"]:
         searcher.bump_data_epoch()
 
-    report = {
+    response = {
         "ok": True,
-        "inserted": inserted,
-        "duplicates": duplicates,
+        "inserted": report["inserted"],
+        "duplicates": report["duplicates"],
+        "invalid": report["invalid"],
         "enqueued_vision": enqueued_vision,
         "enqueued_index": enqueued_index,
     }
-    logger.info("admin import inserted=%s duplicates=%s", inserted, duplicates)
-    return report
+    logger.info("admin import inserted=%s duplicates=%s invalid=%s", report["inserted"], report["duplicates"], report["invalid"])
+    return response
+
+
+@app.get("/api/debug/capture/latest")
+async def debug_latest_capture_api(request: Request) -> dict[str, Any]:
+    if not is_localhost_client(request.client.host if request.client else None):
+        raise HTTPException(status_code=403, detail="Debug endpoint only available from localhost")
+    latest = await asyncio.to_thread(store.latest_item)
+    return latest_capture_debug_payload(latest)
 
 
 @app.post("/api/admin/benchmark/snapshot")

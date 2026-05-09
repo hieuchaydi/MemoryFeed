@@ -1,0 +1,13 @@
+{
+  "platform": "tiktok",
+  "url": "https://www.tiktok.com/@alice/video/1234567890",
+  "canonical_url": "https://www.tiktok.com/@alice/video/1234567890",
+  "text_content": "TikTok caption text",
+  "author_name": "@alice",
+  "author_handle": null,
+  "media_urls": [
+    "https://cdn.example.com/tk-1.jpg"
+  ],
+  "quality_flags": [],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

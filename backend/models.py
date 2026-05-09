@@ -26,6 +26,12 @@ class CaptureRequest(BaseModel):
     source_context: str | None = None
     quality_flags: list[str] = Field(default_factory=list)
     capture_debug: dict | None = None
+    capture_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence_reasons: list[str] = Field(default_factory=list)
+    capture_method: str | None = None
+    extractor_version: str | None = None
+    capture_source: str | None = None
+    replay_source: str | None = None
     dwell_seconds: float = Field(default=0.0, ge=0.0, le=3600.0)
     captured_at: datetime | None = None
 

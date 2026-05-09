@@ -1,0 +1,13 @@
+{
+  "platform": "facebook",
+  "url": "https://www.facebook.com/bob/posts/333",
+  "canonical_url": "https://www.facebook.com/bob/posts/333",
+  "text_content": "Facebook text only nested content",
+  "author_name": "Bob FB",
+  "author_handle": null,
+  "media_urls": [],
+  "quality_flags": [
+    "missing_media_urls"
+  ],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}

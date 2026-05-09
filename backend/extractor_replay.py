@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ class ReplayResult:
     expected: dict[str, Any] | None
     matches_expected: bool
     mismatch_keys: list[str]
+    deterministic: bool
+    replay_timestamp: str
 
 
 class _Node:
@@ -250,7 +253,11 @@ def _collect_urls(
     return output, list(dict.fromkeys(used))
 
 
-def replay_fixture(fixture_html: str | Path, expected_snapshot: str | Path | None = None) -> ReplayResult:
+def replay_fixture(
+    fixture_html: str | Path,
+    expected_snapshot: str | Path | None = None,
+    deterministic: bool = False,
+) -> ReplayResult:
     html_path = Path(fixture_html)
     content = html_path.read_text(encoding="utf-8")
     fixture_name = html_path.name
@@ -280,6 +287,10 @@ def replay_fixture(fixture_html: str | Path, expected_snapshot: str | Path | Non
         fallback.get("media") or [],
         base_url=base_url,
     )
+    if deterministic:
+        media_urls = sorted(media_urls)
+        media_selectors = sorted(dict.fromkeys(media_selectors))
+    replay_timestamp = "2024-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
     canonical = canonical_url or base_url
     required = {
         "platform": platform,
@@ -294,6 +305,8 @@ def replay_fixture(fixture_html: str | Path, expected_snapshot: str | Path | Non
         if (not value) or (isinstance(value, list) and not value)
     ]
     quality_flags = [f"missing_{key}" for key in missing_fields]
+    if deterministic:
+        quality_flags = sorted(quality_flags)
 
     extracted = {
         "platform": platform,
@@ -305,6 +318,8 @@ def replay_fixture(fixture_html: str | Path, expected_snapshot: str | Path | Non
         "media_urls": media_urls[:6],
         "quality_flags": quality_flags,
     }
+    if deterministic:
+        extracted["captured_at"] = replay_timestamp
     selector_used = {
         "text": text_selector or "fallback:none",
         "author_name": author_selector or "fallback:none",
@@ -326,6 +341,8 @@ def replay_fixture(fixture_html: str | Path, expected_snapshot: str | Path | Non
     if expected_path and expected_path.exists():
         expected = json.loads(expected_path.read_text(encoding="utf-8"))
         for key, expected_val in expected.items():
+            if key == "captured_at" and not deterministic:
+                continue
             if extracted.get(key) != expected_val:
                 mismatch_keys.append(key)
     return ReplayResult(
@@ -338,15 +355,24 @@ def replay_fixture(fixture_html: str | Path, expected_snapshot: str | Path | Non
         expected=expected,
         matches_expected=not mismatch_keys,
         mismatch_keys=mismatch_keys,
+        deterministic=deterministic,
+        replay_timestamp=replay_timestamp,
     )
 
 
-def test_platform_fixtures(platform: str, fixture_dir: Path | None = None) -> dict[str, Any]:
+def test_platform_fixtures(
+    platform: str,
+    fixture_dir: Path | None = None,
+    deterministic: bool = False,
+) -> dict[str, Any]:
     directory = fixture_dir or FIXTURE_DIR
-    files = sorted(directory.glob(f"{platform}_*.html"))
-    results = [replay_fixture(path) for path in files]
+    root_files = sorted(directory.glob(f"{platform}_*.html"))
+    nested_files = sorted((directory / platform).glob("*.html")) if (directory / platform).exists() else []
+    files = sorted(root_files + nested_files)
+    results = [replay_fixture(path, deterministic=deterministic) for path in files]
     return {
         "platform": platform,
+        "deterministic": deterministic,
         "fixtures": len(results),
         "passed": sum(1 for row in results if row.matches_expected),
         "failed": sum(1 for row in results if not row.matches_expected),

@@ -80,6 +80,12 @@ class Searcher:
             thumbnail = cache_paths[0] if cache_paths else (image_urls[0] if image_urls else None)
             thumbnail = _normalize_thumbnail(thumbnail)
             text_excerpt = (item.get("text_content") or "").strip()[:200]
+            capture_confidence = float(item.get("capture_confidence", 1.0) or 0.0)
+            quality_flags = [str(flag) for flag in (item.get("quality_flags") or [])]
+            missing_penalty = min(0.2, 0.05 * sum(1 for flag in quality_flags if flag.startswith("missing_")))
+            duplicate_penalty = 0.08 if "duplicate_risk" in quality_flags else 0.0
+            quality_multiplier = 0.7 + 0.3 * max(0.0, min(1.0, capture_confidence))
+            effective_score = max(0.0, float(score) * quality_multiplier - missing_penalty - duplicate_penalty)
 
             merged.append(
                 {
@@ -92,6 +98,7 @@ class Searcher:
                     "author": item.get("author"),
                     "captured_at": item.get("captured_at"),
                     "score": round(float(score), 8),
+                    "rank_score": round(float(effective_score), 8),
                     "starred": bool(item.get("starred", False)),
                     "note": item.get("note"),
                     "tags": item.get("tags", []),
@@ -109,11 +116,14 @@ class Searcher:
                     "semantic_group": item.get("semantic_group"),
                     "suspicious_prompt_content": bool(item.get("suspicious_prompt_content", False)),
                     "embedding_skipped_reason": item.get("embedding_skipped_reason"),
+                    "capture_confidence": capture_confidence,
                 }
             )
-            if len(merged) >= limit:
+            if len(merged) >= max(limit * 3, limit):
                 break
         stage_merge_ms = (time.perf_counter() - stage_started) * 1000.0
+        merged.sort(key=lambda row: float(row.get("rank_score", 0.0)), reverse=True)
+        merged = merged[:limit]
 
         self._cache_put(cache_key, merged)
         self._record_timing(

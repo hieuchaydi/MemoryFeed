@@ -95,6 +95,8 @@ def compute_scores(conn, item: dict[str, Any]) -> ScoreBundle:
     surfaced_count = _safe_count(item.get("surfaced_count"))
     starred = 1.0 if item.get("starred") else 0.0
     dwell = float(item.get("dwell_seconds") or 0.0)
+    capture_confidence = float(item.get("capture_confidence", 1.0) or 0.0)
+    quality_flags = [str(flag) for flag in (item.get("quality_flags") or [])]
 
     recurrence_raw = (
         min(1.0, recurrence_signals["same_url"] / 5.0) * 0.45
@@ -106,11 +108,18 @@ def compute_scores(conn, item: dict[str, Any]) -> ScoreBundle:
     interaction = _clamp01(min(1.0, surfaced_count / 6.0) * 0.6 + starred * 0.4)
     dwell_component = _clamp01(dwell / 120.0)
 
-    importance = _clamp01(recurrence * 0.45 + interaction * 0.35 + recency * 0.1 + dwell_component * 0.1)
+    missing_penalty = min(0.2, 0.05 * sum(1 for flag in quality_flags if flag.startswith("missing_")))
+    confidence_penalty = max(0.0, 0.7 - capture_confidence) * 0.3
+    duplicate_penalty = 0.1 if "duplicate_risk" in quality_flags else 0.0
+    quality_penalty = missing_penalty + confidence_penalty + duplicate_penalty
+
+    importance = _clamp01(recurrence * 0.45 + interaction * 0.35 + recency * 0.1 + dwell_component * 0.1 - quality_penalty)
 
     age_days = max(0.0, (datetime.now(timezone.utc) - _parse_iso(item.get("captured_at"))).total_seconds() / 86400.0)
     stale_bonus = 0.25 if age_days >= 10 else 0.0
-    resurfacing = _clamp01((importance * 0.5) + stale_bonus + (1.0 - recency) * 0.3 - min(0.25, surfaced_count * 0.03))
+    resurfacing = _clamp01(
+        (importance * 0.5) + stale_bonus + (1.0 - recency) * 0.3 - min(0.25, surfaced_count * 0.03) - quality_penalty * 0.5
+    )
 
     explain = {
         "recurrence_signals": recurrence_signals,
@@ -118,6 +127,11 @@ def compute_scores(conn, item: dict[str, Any]) -> ScoreBundle:
             "starred": bool(item.get("starred")),
             "surfaced_count": surfaced_count,
             "dwell_seconds": round(dwell, 3),
+        },
+        "quality": {
+            "capture_confidence": round(capture_confidence, 4),
+            "quality_flags": quality_flags,
+            "quality_penalty": round(quality_penalty, 4),
         },
         "age_days": round(age_days, 3),
     }

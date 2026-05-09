@@ -40,6 +40,40 @@ class RankingTests(unittest.TestCase):
             after = store.get_item("rank-1")
             self.assertGreaterEqual(after["importance_score"], before["importance_score"])
 
+    def test_low_confidence_capture_gets_lower_importance(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="memoryfeed-ranking-confidence-") as tmp:
+            store = Store(db_path=Path(tmp) / "memoryfeed.db")
+            captured_at = datetime.now(timezone.utc).isoformat()
+            high = {
+                "id": "rank-hi",
+                "url": "https://example.com/rank/high",
+                "platform": "unknown",
+                "content_type": "post",
+                "text_content": "high confidence sample",
+                "captured_at": captured_at,
+                "dedupe_key": "rank-hi-key",
+                "capture_confidence": 0.95,
+                "quality_flags": [],
+            }
+            low = {
+                "id": "rank-lo",
+                "url": "https://example.com/rank/low",
+                "platform": "unknown",
+                "content_type": "post",
+                "text_content": "low confidence sample",
+                "captured_at": captured_at,
+                "dedupe_key": "rank-lo-key",
+                "capture_confidence": 0.25,
+                "quality_flags": ["missing_author_name", "missing_media_urls"],
+            }
+            ok_hi, _ = store.insert_item(high)
+            ok_lo, _ = store.insert_item(low)
+            self.assertTrue(ok_hi)
+            self.assertTrue(ok_lo)
+            high_row = store.get_item("rank-hi")
+            low_row = store.get_item("rank-lo")
+            self.assertGreaterEqual(high_row["importance_score"], low_row["importance_score"])
+
 
 if __name__ == "__main__":
     unittest.main()

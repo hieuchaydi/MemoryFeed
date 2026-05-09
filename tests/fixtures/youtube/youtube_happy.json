@@ -1,0 +1,13 @@
+{
+  "platform": "youtube",
+  "url": "https://www.youtube.com/watch?v=yt111&t=32",
+  "canonical_url": "https://www.youtube.com/watch?v=yt111&t=32",
+  "text_content": "YouTube description text",
+  "author_name": "@AliceYT",
+  "author_handle": null,
+  "media_urls": [
+    "https://img.youtube.com/vi/yt111/hqdefault.jpg"
+  ],
+  "quality_flags": [],
+  "captured_at": "2024-01-01T00:00:00+00:00"
+}
