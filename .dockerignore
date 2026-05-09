@@ -1,0 +1,12 @@
+﻿.git
+.github
+.vscode
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+ci_logs
+frontend/node_modules
+docs-react/node_modules

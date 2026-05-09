@@ -6,6 +6,10 @@
 
 ![MemoryFeed Logo](frontend/public/logo-memoryfeed.svg)
 
+## Demo Video
+
+- [Watch demo video](video/ShareX_VF7qbHSZPP.mp4)
+
 MemoryFeed is a local-first social memory system:
 
 - Browser extension captures social posts after 3s dwell.

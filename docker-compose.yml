@@ -1,0 +1,18 @@
+﻿services:
+  memoryfeed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: memoryfeed
+    ports:
+      - "7749:7749"
+    environment:
+      OFFLINE_ONLY: "1"
+      MEMORYFEED_AI_PROVIDER: "none"
+      MEMORYFEED_DATA_DIR: "/data"
+    volumes:
+      - memoryfeed_data:/data
+    restart: unless-stopped
+
+volumes:
+  memoryfeed_data:
