@@ -118,7 +118,7 @@ jobs:
 
       - name: Install Docs Dependencies
         working-directory: docs-react
-        run: npm ci
+        run: npm install
 
       - name: Build Docs
         working-directory: docs-react
