@@ -58,8 +58,27 @@ MEMORYFEED_AI_PROVIDER=none
 - `extension/chrome`: Chromium extension (Chrome/Edge/Brave).
 - `extension/firefox`: Firefox extension package.
 - `backend`: capture normalization, store, indexing, search, server.
+- `memoryfeed-core`: standalone core Python library for third-party integration.
 - `frontend`: React app (Search / Active Feed / Timeline / Stats).
 - `native`: pybind11 C++ module (`memoryfeed_native`) for acceleration.
+
+## Core Library Integration
+
+Install only the extracted core package:
+
+```bash
+pip install -e ./memoryfeed-core
+```
+
+Example:
+
+```python
+from memoryfeed_core import Store, IndexerService, Searcher
+
+store = Store()
+indexer = IndexerService(store)
+searcher = Searcher(store, indexer)
+```
 
 ## Engineering Docs
 
