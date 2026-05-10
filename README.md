@@ -1,6 +1,6 @@
 # MemoryFeed
 [![CI](https://github.com/hieuchaydi/MemoryFeed/actions/workflows/ci.yml/badge.svg)](https://github.com/hieuchaydi/MemoryFeed/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](memoryfeed/__version__.py)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](memoryfeed/__version__.py)
 [![License](https://img.shields.io/badge/license-not_specified-lightgrey.svg)](pyproject.toml)
 [![Security Policy](https://img.shields.io/badge/security-policy-brightgreen.svg)](SECURITY.md)
 
@@ -378,3 +378,5 @@ Current mapping:
 - Search includes short-TTL response cache with automatic invalidation on new captures.
 - Semantic query vectors use in-memory cache to reduce repeated model encodes.
 - Dedupe fingerprint = canonical URL + normalized text + author + 2-hour time bucket.
+
+
