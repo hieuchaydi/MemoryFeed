@@ -91,6 +91,7 @@ searcher = Searcher(store, indexer)
 - Backup strategy: `BACKUP_STRATEGY.md`
 - Revenue playbook: `docs/REVENUE_PLAYBOOK.md`
 - Outreach templates: `docs/OUTREACH_TEMPLATES.md`
+- First $15 plan: `docs/FIRST_15_USD_PLAN.md`
 
 ## Work With MemoryFeed
 

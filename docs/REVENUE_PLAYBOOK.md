@@ -43,7 +43,7 @@ Open a Paid Integration Request in the repo with scope + budget.
 
 ## 5) First-dollar checklist
 
-- [ ] Push branch with monetization files.
+- [x] Push branch with monetization files.
 - [ ] Open one pinned issue: "Paid integration slots (this week)".
 - [ ] Share to 5 relevant communities.
 - [ ] Close first micro gig in <24h.
