@@ -1,0 +1,9 @@
+# Replace this list with your validated targets.
+# Keep only repos where maintainers welcome collaboration requests.
+
+mem0ai/mem0
+run-llama/llama_index
+microsoft/semantic-kernel
+langchain-ai/langchain
+open-webui/open-webui
+lobehub/lobe-chat

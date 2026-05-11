@@ -1,0 +1,65 @@
+name: Paid Integration Request
+description: Request paid implementation, deployment, or a focused sprint for MemoryFeed.
+title: "[Paid] <short scope title>"
+labels: ["partnership", "paid"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your interest in a paid collaboration.
+        Share only what is needed so we can estimate quickly.
+
+  - type: input
+    id: company_or_name
+    attributes:
+      label: Company or name
+      placeholder: Your team or personal name
+    validations:
+      required: true
+
+  - type: dropdown
+    id: request_type
+    attributes:
+      label: Request type
+      options:
+        - Bugfix and hardening
+        - Private deployment setup
+        - MCP integration
+        - Feature development sprint
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What outcome do you want?
+      placeholder: Describe the desired result, constraints, and acceptance criteria.
+    validations:
+      required: true
+
+  - type: input
+    id: budget
+    attributes:
+      label: Budget (USD)
+      placeholder: 5, 25, 100, 500...
+    validations:
+      required: true
+
+  - type: input
+    id: timeline
+    attributes:
+      label: Timeline
+      placeholder: e.g. 24 hours, this week, 2 weeks
+    validations:
+      required: true
+
+  - type: textarea
+    id: contact
+    attributes:
+      label: Contact and next step
+      description: Preferred channel and when you are available.
+      placeholder: GitHub handle/email/Telegram and best time window.
+    validations:
+      required: true

@@ -89,6 +89,21 @@ searcher = Searcher(store, indexer)
 - Production runbook: `PRODUCTION.md`
 - Monitoring runbook: `MONITORING.md`
 - Backup strategy: `BACKUP_STRATEGY.md`
+- Revenue playbook: `docs/REVENUE_PLAYBOOK.md`
+- Outreach templates: `docs/OUTREACH_TEMPLATES.md`
+
+## Work With MemoryFeed
+
+Need a paid integration, custom deployment, or focused feature sprint?
+
+- Open a request: `Issues -> New issue -> Paid Integration Request`
+- Or open a direct offer issue with your scope, timeline, and budget.
+- Typical starter options:
+  - `$5`: quick triage + one targeted fix recommendation
+  - `$25`: setup/debug session with actionable patch plan
+  - `$75+`: scoped implementation sprint in this repo
+
+Sponsor links can be enabled via `.github/FUNDING.yml`.
 
 ## Requirements
 
