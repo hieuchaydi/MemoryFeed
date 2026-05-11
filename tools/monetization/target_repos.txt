@@ -7,3 +7,13 @@ microsoft/semantic-kernel
 langchain-ai/langchain
 open-webui/open-webui
 lobehub/lobe-chat
+langgenius/dify
+crewAIInc/crewAI
+All-Hands-AI/OpenHands
+microsoft/autogen
+ContinueDev/continue
+browser-use/browser-use
+BerriAI/litellm
+comfyanonymous/ComfyUI
+getzep/graphiti
+microsoft/markitdown
