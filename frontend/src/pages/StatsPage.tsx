@@ -63,6 +63,22 @@ export default function StatsPage() {
           <span>{t.stats.visionProcessed}</span>
           <b>{queueQ.data ? `${queueQ.data.vision.processed}/${queueQ.data.vision.failed}` : "..."}</b>
         </div>
+        <div className="status-card">
+          <span>Capture Health</span>
+          <b>{statsQ.data?.capture_health ? `${Math.round(statsQ.data.capture_health.health_score * 100)}%` : "..."}</b>
+        </div>
+        <div className="status-card">
+          <span>Low Confidence</span>
+          <b>{statsQ.data?.capture_health?.low_confidence ?? "..."}</b>
+        </div>
+        <div className="status-card">
+          <span>Missing Required</span>
+          <b>{statsQ.data?.capture_health?.missing_required ?? "..."}</b>
+        </div>
+        <div className="status-card">
+          <span>Image Cache</span>
+          <b>{statsQ.data?.image_cache ? `${statsQ.data.image_cache.mb} MB / ${statsQ.data.image_cache.files} files` : "..."}</b>
+        </div>
       </div>
 
       <div className="action-row">

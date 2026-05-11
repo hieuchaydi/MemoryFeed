@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.2.0 - Hardening Patch (2026-05-11)
+
+### Added
+- Public mode TLS startup guard:
+  - Startup now fails when running public bind without TLS termination flag.
+  - New env controls: `MEMORYFEED_PUBLIC_REQUIRE_TLS`, `MEMORYFEED_TLS_TERMINATED`.
+- Image cache lifecycle controls:
+  - New env `MEMORY_IMAGE_CACHE_MAX_MB` for cache quota.
+  - LRU-style cache eviction integrated into maintenance cycle.
+  - `/api/stats` now reports image cache usage (`bytes`, `mb`, `files`).
+- Capture health visibility:
+  - `/api/stats` now includes `capture_health` (`low_confidence`, `missing_required`, `health_score`).
+  - Stats frontend now shows Capture Health and image cache cards.
+- Documentation:
+  - Added `docs/V1_2_0_HARDENING_SPEC.md`.
+
+### Changed
+- Maintenance summary now includes `evicted_images`.
+
+### Tests
+- Updated maintenance test to assert `evicted_images`.
+- Added `tests/test_public_mode_tls.py` for TLS enforcement behavior.
+
 ## v0.4.0 - Reliability Hardening (2026-05-09)
 
 ### Added

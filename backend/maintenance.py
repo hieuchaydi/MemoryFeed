@@ -34,16 +34,19 @@ class MaintenanceScheduler:
             self._task = None
 
     async def run_once(self) -> dict[str, int]:
+        cfg = load_runtime_config()
         rebuilt = await asyncio.to_thread(self.store.rebuild_all_fingerprints)
         compacted = await asyncio.to_thread(self.store.compact_indexes)
         cleaned = await asyncio.to_thread(self.store.cleanup_old_logs, 7)
         decayed = await asyncio.to_thread(self.store.recompute_decay_states)
+        evicted_images = await asyncio.to_thread(self.store.enforce_image_cache_limit, cfg.image_cache_max_mb)
         dirty = await asyncio.to_thread(collect_dirty_items, self.store, 1000)
         return {
             "rebuilt_fingerprints": int(rebuilt),
             "compacted_indexes": int(compacted),
             "logs_cleaned": int(cleaned),
             "recomputed_rankings": int(decayed),
+            "evicted_images": int(evicted_images),
             "dirty_items": len(dirty),
         }
 
@@ -53,12 +56,13 @@ class MaintenanceScheduler:
             try:
                 summary = await self.run_once()
                 logger.info(
-                    "maintenance_run timestamp=%s rebuilt=%s compacted=%s logs_cleaned=%s recomputed_rankings=%s dirty_items=%s",
+                    "maintenance_run timestamp=%s rebuilt=%s compacted=%s logs_cleaned=%s recomputed_rankings=%s evicted_images=%s dirty_items=%s",
                     datetime.now(timezone.utc).isoformat(),
                     summary["rebuilt_fingerprints"],
                     summary["compacted_indexes"],
                     summary["logs_cleaned"],
                     summary["recomputed_rankings"],
+                    summary["evicted_images"],
                     summary["dirty_items"],
                 )
             except Exception:

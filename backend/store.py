@@ -756,15 +756,89 @@ class Store:
                     (cfg.memory_namespace,),
                 ).fetchall()
             ]
+            low_confidence = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE COALESCE(namespace, 'default') = ? AND COALESCE(capture_confidence, 1.0) < 0.7",
+                    (cfg.memory_namespace,),
+                ).fetchone()[0]
+            )
+            missing_required = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) FROM items
+                    WHERE COALESCE(namespace, 'default') = ?
+                      AND COALESCE(quality_flags, '') LIKE '%missing_%'
+                    """,
+                    (cfg.memory_namespace,),
+                ).fetchone()[0]
+            )
+            image_cache = self.image_cache_stats()
             return {
                 "total": total,
                 "today": today,
                 "by_platform": by_platform,
                 "by_type": by_type,
                 "namespace": cfg.memory_namespace,
+                "capture_health": {
+                    "low_confidence": low_confidence,
+                    "missing_required": missing_required,
+                    "health_score": round(
+                        max(0.0, 1.0 - ((low_confidence + missing_required) / max(1, total))),
+                        4,
+                    ),
+                },
+                "image_cache": image_cache,
             }
         finally:
             conn.close()
+
+    def image_cache_stats(self) -> dict[str, int]:
+        total_bytes = 0
+        file_count = 0
+        for base in (IMAGE_CACHE_DIR, IMAGE_ENCRYPTED_DIR):
+            if not base.exists():
+                continue
+            for p in base.glob("*"):
+                if not p.is_file():
+                    continue
+                try:
+                    total_bytes += int(p.stat().st_size)
+                    file_count += 1
+                except OSError:
+                    continue
+        return {"bytes": total_bytes, "files": file_count, "mb": int(total_bytes / (1024 * 1024))}
+
+    def enforce_image_cache_limit(self, max_mb: int) -> int:
+        max_bytes = max(1, int(max_mb)) * 1024 * 1024
+        entries: list[tuple[Path, float, int]] = []
+        total_bytes = 0
+        for base in (IMAGE_CACHE_DIR, IMAGE_ENCRYPTED_DIR):
+            if not base.exists():
+                continue
+            for p in base.glob("*"):
+                if not p.is_file():
+                    continue
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                size = int(st.st_size)
+                total_bytes += size
+                entries.append((p, float(st.st_mtime), size))
+        if total_bytes <= max_bytes:
+            return 0
+        entries.sort(key=lambda t: t[1])
+        removed = 0
+        for p, _, size in entries:
+            if total_bytes <= max_bytes:
+                break
+            try:
+                p.unlink(missing_ok=True)
+                total_bytes -= size
+                removed += 1
+            except OSError:
+                continue
+        return removed
 
     def count_today(self) -> int:
         cfg = load_runtime_config()

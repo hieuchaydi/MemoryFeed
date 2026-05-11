@@ -83,6 +83,16 @@ export interface StatsResponse {
   by_platform: StatRow[];
   by_type: StatRow[];
   queues?: QueueStatusResponse;
+  capture_health?: {
+    low_confidence: number;
+    missing_required: number;
+    health_score: number;
+  };
+  image_cache?: {
+    bytes: number;
+    files: number;
+    mb: number;
+  };
 }
 
 export interface ItemsResponse {

@@ -45,6 +45,9 @@ class RuntimeConfig:
     api_rate_limit_requests: int
     api_rate_limit_window_seconds: int
     encryption_mode: str
+    image_cache_max_mb: int
+    public_mode_require_tls: bool
+    public_mode_tls_terminated: bool
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -145,6 +148,9 @@ def load_runtime_config() -> RuntimeConfig:
         api_rate_limit_requests=env_int("MEMORY_API_RATE_LIMIT_REQUESTS", default=120, min_value=10, max_value=5000),
         api_rate_limit_window_seconds=env_int("MEMORY_API_RATE_LIMIT_WINDOW_SECONDS", default=60, min_value=1, max_value=3600),
         encryption_mode=_encryption_mode(),
+        image_cache_max_mb=env_int("MEMORY_IMAGE_CACHE_MAX_MB", default=2048, min_value=128, max_value=1024 * 1024),
+        public_mode_require_tls=env_flag("MEMORYFEED_PUBLIC_REQUIRE_TLS", default=True),
+        public_mode_tls_terminated=env_flag("MEMORYFEED_TLS_TERMINATED", default=False),
     )
 
 

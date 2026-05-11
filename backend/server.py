@@ -181,6 +181,16 @@ async def startup_event() -> None:
     if not privacy_report.local_only_verified:
         logger.warning("local_only_guard_failed violations=%s", ",".join(privacy_report.violations))
     bind_host = os.getenv("MEMORYFEED_BIND_HOST", "").strip()
+    if (
+        cfg.public_mode
+        and cfg.public_mode_require_tls
+        and bind_host
+        and bind_host not in {"127.0.0.1", "localhost", "::1"}
+        and not cfg.public_mode_tls_terminated
+    ):
+        raise RuntimeError(
+            "Public mode requires TLS termination. Set MEMORYFEED_TLS_TERMINATED=1 behind HTTPS reverse proxy."
+        )
     if bind_host and bind_host not in {"127.0.0.1", "localhost", "::1"} and not cfg.admin_token:
         logger.warning(
             "public_bind_without_admin_token host=%s public_mode=%s",

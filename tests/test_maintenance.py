@@ -28,6 +28,7 @@ class MaintenanceTests(unittest.TestCase):
             self.assertIn("rebuilt_fingerprints", summary)
             self.assertIn("compacted_indexes", summary)
             self.assertIn("logs_cleaned", summary)
+            self.assertIn("evicted_images", summary)
 
 
 if __name__ == "__main__":
