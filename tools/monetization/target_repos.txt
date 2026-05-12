@@ -18,3 +18,15 @@ BerriAI/litellm
 comfyanonymous/ComfyUI
 getzep/graphiti
 microsoft/markitdown
+infiniflow/ragflow
+letta-ai/letta
+microsoft/promptflow
+modelcontextprotocol/servers
+microsoft/graphrag
+openai/openai-agents-python
+fixie-ai/ultravox
+chroma-core/chroma
+qdrant/qdrant
+weaviate/weaviate
+deepset-ai/haystack
+Mintplex-Labs/anything-llm

@@ -22,6 +22,18 @@ Created from automation script:
 15. https://github.com/getzep/graphiti/issues/1485
 16. https://github.com/microsoft/markitdown/issues/1873
 17. https://github.com/langchain-ai/langgraph/issues/7774
+18. https://github.com/infiniflow/ragflow/issues/14821
+19. https://github.com/letta-ai/letta/issues/3337
+20. https://github.com/microsoft/promptflow/issues/4159
+21. https://github.com/modelcontextprotocol/servers/issues/4141
+22. https://github.com/microsoft/graphrag/issues/2355
+23. https://github.com/openai/openai-agents-python/issues/3372
+24. https://github.com/fixie-ai/ultravox/issues/335
+25. https://github.com/chroma-core/chroma/issues/7048
+26. https://github.com/qdrant/qdrant/issues/9000
+27. https://github.com/weaviate/weaviate/issues/11267
+28. https://github.com/deepset-ai/haystack/issues/11299
+29. https://github.com/Mintplex-Labs/anything-llm/issues/5613
 
 ## Next actions
 
@@ -35,3 +47,6 @@ Created from automation script:
 
 - `langchain-ai/langchain` issue was auto-closed by repository automation (programmatic submission blocked).
 - `open-webui/open-webui` issue title was updated to include required `feat:` prefix.
+- `langchain-ai/langserve` issue create failed in automation wave.
+- `microsoft/TaskWeaver` issue create failed (repository appears read-only/archived).
+- `letta-ai/letta` issue auto-closed because required template + human verification fields were not present.
