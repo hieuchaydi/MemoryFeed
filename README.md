@@ -93,6 +93,7 @@ searcher = Searcher(store, indexer)
 - Outreach templates: `docs/OUTREACH_TEMPLATES.md`
 - First $15 plan: `docs/FIRST_15_USD_PLAN.md`
 - Money execution + withdrawal runbook (VI): `docs/MONEY_EXECUTION_AND_WITHDRAWAL.md`
+- First $10 operations runbook: `docs/FIRST_10_USD_OPERATIONS.md`
 
 ## Work With MemoryFeed
 
