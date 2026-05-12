@@ -21,6 +21,9 @@ Two completed orders = `$10`.
 - Leads init script: `tools/monetization/init_leads_from_targets.ps1`
 - Next actions script: `tools/monetization/show_next_actions.ps1`
 - Lead stage update script: `tools/monetization/update_lead_stage.ps1`
+- Continuous loop: `tools/monetization/continuous_until_10usd.ps1`
+- Start loop in background: `tools/monetization/start_continuous_10usd.ps1`
+- Stop loop: `tools/monetization/stop_continuous_10usd.ps1`
 
 ## Commands
 
@@ -45,6 +48,14 @@ Run full pipeline:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\monetization\run_10usd_pipeline.ps1 -GoalUsd 10
+```
+
+Run continuously in background:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\monetization\start_continuous_10usd.ps1 `
+  -GoalUsd 10 `
+  -IntervalMinutes 15
 ```
 
 ## Done condition

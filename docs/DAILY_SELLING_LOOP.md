@@ -9,6 +9,7 @@ Muc tieu ngay: dat them it nhat `$10`.
 3. Follow-up cac lead den han.
 4. Kiem tra payment moi, ghi vao `revenue_tracker.csv`.
 5. Kiem tra lai tong doanh thu.
+6. Neu muon chay lien tuc, bat `start_continuous_10usd.ps1`.
 
 ## Lenh su dung
 
