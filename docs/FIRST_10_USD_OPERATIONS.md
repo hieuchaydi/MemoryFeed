@@ -17,6 +17,10 @@ Two completed orders = `$10`.
 - Add payment script: `tools/monetization/record_payment.ps1`
 - Status script: `tools/monetization/revenue_status.ps1`
 - Pipeline script: `tools/monetization/run_10usd_pipeline.ps1`
+- Leads tracker: `tools/monetization/leads_tracker.csv`
+- Leads init script: `tools/monetization/init_leads_from_targets.ps1`
+- Next actions script: `tools/monetization/show_next_actions.ps1`
+- Lead stage update script: `tools/monetization/update_lead_stage.ps1`
 
 ## Commands
 

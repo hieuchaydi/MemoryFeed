@@ -94,6 +94,7 @@ searcher = Searcher(store, indexer)
 - First $15 plan: `docs/FIRST_15_USD_PLAN.md`
 - Money execution + withdrawal runbook (VI): `docs/MONEY_EXECUTION_AND_WITHDRAWAL.md`
 - First $10 operations runbook: `docs/FIRST_10_USD_OPERATIONS.md`
+- Daily selling loop (VI): `docs/DAILY_SELLING_LOOP.md`
 
 ## Work With MemoryFeed
 
