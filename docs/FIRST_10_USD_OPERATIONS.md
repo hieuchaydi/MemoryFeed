@@ -16,6 +16,7 @@ Two completed orders = `$10`.
 - Tracker CSV: `tools/monetization/revenue_tracker.csv`
 - Add payment script: `tools/monetization/record_payment.ps1`
 - Status script: `tools/monetization/revenue_status.ps1`
+- Pipeline script: `tools/monetization/run_10usd_pipeline.ps1`
 
 ## Commands
 
@@ -34,6 +35,12 @@ Check status:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\monetization\revenue_status.ps1 -GoalUsd 10
+```
+
+Run full pipeline:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\monetization\run_10usd_pipeline.ps1 -GoalUsd 10
 ```
 
 ## Done condition
