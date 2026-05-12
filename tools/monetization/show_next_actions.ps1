@@ -5,10 +5,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common_tracker.ps1")
 
-if (-not (Test-Path -LiteralPath $LeadsFile)) {
-  throw "Leads file not found: $LeadsFile"
-}
+Ensure-LeadsTrackerSchema -LeadsFile $LeadsFile
 
 $rows = @(Import-Csv -LiteralPath $LeadsFile)
 $now = (Get-Date).ToUniversalTime()
@@ -39,5 +38,9 @@ if (@($selected).Count -eq 0) {
 
 Write-Host "Due lead actions:"
 foreach ($row in $selected) {
-  Write-Host ("- {0} | stage={1} | next={2} | offer=`${3}" -f $row.repo, $row.stage, $row.next_action_utc, $row.budget_offer_usd)
+  $offer = "$($row.offer_price_usd)"
+  if ($offer.Trim() -eq "") { $offer = "10" }
+  $source = "$($row.source_channel)"
+  if ($source.Trim() -eq "") { $source = "$($row.contact_channel)" }
+  Write-Host ("- {0} | stage={1} | source={2} | next={3} | offer=`${4}" -f $row.repo, $row.stage, $source, $row.next_action_utc, $offer)
 }

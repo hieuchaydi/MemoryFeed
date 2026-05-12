@@ -1,11 +1,12 @@
 param(
-  [double]$GoalUsd = 10,
+  [double]$GoalUsd = 20,
   [int]$RunnerIntervalMinutes = 10,
   [int]$WatchIntervalSeconds = 60
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common_tracker.ps1")
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $trackerFile = Join-Path $repoRoot "tools/monetization/revenue_tracker.csv"
@@ -17,18 +18,6 @@ if (-not (Test-Path -LiteralPath $trackerFile)) { throw "Missing tracker file: $
 if (-not (Test-Path -LiteralPath $startRunnerScript)) { throw "Missing start script: $startRunnerScript" }
 if (-not (Test-Path -LiteralPath $stopRunnerScript)) { throw "Missing stop script: $stopRunnerScript" }
 
-function Get-TotalUsd {
-  param([string]$CsvFile)
-  $rows = @(Import-Csv -LiteralPath $CsvFile)
-  $sum = 0.0
-  foreach ($row in $rows) {
-    if ($row.amount_usd -ne $null -and "$($row.amount_usd)".Trim() -ne "") {
-      $sum += [double]$row.amount_usd
-    }
-  }
-  return [Math]::Round($sum, 2)
-}
-
 function Get-RunnerCount {
   $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $_.CommandLine -like "*continuous_until_10usd.ps1*" })
@@ -39,10 +28,10 @@ Write-Host "Watchdog started. Goal=$GoalUsd"
 
 while ($true) {
   $ts = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-  $total = Get-TotalUsd -CsvFile $trackerFile
+  $totals = Get-RevenueTotals -TrackerFile $trackerFile
 
-  if ($total -ge $GoalUsd) {
-    Add-Content -LiteralPath $watchdogLog -Value "$ts total=$total goal=$GoalUsd action=goal_reached_stop_runner"
+  if ($totals.ValidatedTotal -ge $GoalUsd) {
+    Add-Content -LiteralPath $watchdogLog -Value "$ts total=$($totals.Total) validated_total=$($totals.ValidatedTotal) goal=$GoalUsd action=goal_reached_stop_runner"
     Push-Location $repoRoot
     try {
       & powershell -ExecutionPolicy Bypass -File $stopRunnerScript
@@ -54,7 +43,7 @@ while ($true) {
 
   $runnerCount = Get-RunnerCount
   if ($runnerCount -eq 0) {
-    Add-Content -LiteralPath $watchdogLog -Value "$ts total=$total action=runner_missing_restart"
+    Add-Content -LiteralPath $watchdogLog -Value "$ts total=$($totals.Total) validated_total=$($totals.ValidatedTotal) action=runner_missing_restart"
     Push-Location $repoRoot
     try {
       & powershell -ExecutionPolicy Bypass -File $startRunnerScript -GoalUsd $GoalUsd -IntervalMinutes $RunnerIntervalMinutes
@@ -62,7 +51,7 @@ while ($true) {
       Pop-Location
     }
   } else {
-    Add-Content -LiteralPath $watchdogLog -Value "$ts total=$total action=runner_ok count=$runnerCount"
+    Add-Content -LiteralPath $watchdogLog -Value "$ts total=$($totals.Total) validated_total=$($totals.ValidatedTotal) action=runner_ok count=$runnerCount"
   }
 
   Start-Sleep -Seconds ([Math]::Max(30, $WatchIntervalSeconds))

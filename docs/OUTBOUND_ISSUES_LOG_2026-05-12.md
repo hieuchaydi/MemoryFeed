@@ -41,7 +41,7 @@ Created from automation script:
 - Move interested leads to `negotiating` stage.
 - When a payment lands, run:
   `tools/monetization/record_payment.ps1`
-- Stop only when `revenue_status.ps1 -GoalUsd 10` reports `GOAL_REACHED`.
+- Stop only when `revenue_status.ps1 -GoalUsd 20` reports `GOAL_REACHED`.
 
 ## Notes
 

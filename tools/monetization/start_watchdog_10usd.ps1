@@ -1,5 +1,5 @@
 param(
-  [double]$GoalUsd = 10,
+  [double]$GoalUsd = 20,
   [int]$RunnerIntervalMinutes = 10,
   [int]$WatchIntervalSeconds = 60
 )

@@ -1,15 +1,16 @@
 # Daily Selling Loop (Khong Dung Lai Truoc Khi Dat Muc Tieu)
 
-Muc tieu ngay: dat them it nhat `$10`.
+Muc tieu ngay: dat them it nhat `$20`.
 
 ## Vong lap moi 60 phut
 
 1. Chay `run_10usd_pipeline.ps1` de day outreach.
-2. Cap nhat lead stage trong `leads_tracker.csv`.
-3. Follow-up cac lead den han.
-4. Kiem tra payment moi, ghi vao `revenue_tracker.csv`.
-5. Kiem tra lai tong doanh thu.
-6. Chay watchdog de tu phuc hoi runner: `start_watchdog_10usd.ps1`.
+2. Them lead direct-sales (`facebook/zalo/linkedin/community`) bang `add_direct_lead.ps1`.
+3. Cap nhat lead stage trong `leads_tracker.csv`.
+4. Follow-up cac lead den han.
+5. Kiem tra payment moi, ghi vao `revenue_tracker.csv`.
+6. Kiem tra lai tong doanh thu.
+7. Chay watchdog de tu phuc hoi runner: `start_watchdog_10usd.ps1`.
 
 ## Lenh su dung
 
@@ -17,6 +18,16 @@ Khoi tao lead tracker tu danh sach repo:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\monetization\init_leads_from_targets.ps1
+```
+
+Them lead direct-sales:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\monetization\add_direct_lead.ps1 `
+  -ClientName "khach-a" `
+  -SourceChannel "facebook" `
+  -OfferPriceUsd 10 `
+  -Note "inbox from personal profile"
 ```
 
 Xem viec can lam tiep theo:
@@ -38,17 +49,19 @@ Ghi nhan payment:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\monetization\record_payment.ps1 `
-  -AmountUsd 5 `
+  -AmountUsd 10 `
   -Client "owner/name" `
-  -Channel "github" `
-  -Package "quick-triage" `
+  -Channel "facebook" `
+  -Package "debug-triage-10usd" `
+  -TransactionId "txn-123" `
+  -ProofRef "receipt-link-or-screenshot" `
   -Note "paid"
 ```
 
 Kiem tra tong tien:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\monetization\revenue_status.ps1 -GoalUsd 10
+powershell -ExecutionPolicy Bypass -File tools\monetization\revenue_status.ps1 -GoalUsd 20
 ```
 
 ## Dinh nghia stage
@@ -62,4 +75,4 @@ powershell -ExecutionPolicy Bypass -File tools\monetization\revenue_status.ps1 -
 
 ## Dieu kien dung
 
-Chi dung khi status doanh thu bao `GOAL_REACHED` voi muc tieu `$10`.
+Chi dung khi status doanh thu bao `GOAL_REACHED` voi muc tieu `$20` (validated total).

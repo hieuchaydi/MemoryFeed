@@ -95,6 +95,7 @@ searcher = Searcher(store, indexer)
 - Money execution + withdrawal runbook (VI): `docs/MONEY_EXECUTION_AND_WITHDRAWAL.md`
 - First $10 operations runbook: `docs/FIRST_10_USD_OPERATIONS.md`
 - Daily selling loop (VI): `docs/DAILY_SELLING_LOOP.md`
+- Direct-sales $20 kit (VI): `docs/DIRECT_SALES_20USD_KIT.md`
 
 ## Work With MemoryFeed
 
@@ -103,8 +104,9 @@ Need a paid integration, custom deployment, or focused feature sprint?
 - Open a request: `Issues -> New issue -> Paid Integration Request`
 - Or open a direct offer issue with your scope, timeline, and budget.
 - Typical starter options:
-  - `$5`: quick triage + one targeted fix recommendation
-  - `$25`: setup/debug session with actionable patch plan
+  - `$10`: debug triage package (diagnosis + fix path + acceptance checklist)
+  - `$10`: setup/integration mini package (runbook + patch scope)
+  - `$25`: setup/debug session with deeper actionable patch plan
   - `$75+`: scoped implementation sprint in this repo
 
 Sponsor links can be enabled via `.github/FUNDING.yml`.
