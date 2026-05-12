@@ -1298,16 +1298,21 @@ def _parse_iso(value: str | None) -> datetime | None:
 def _build_safe_fts_query(query: str) -> str:
     text = " ".join(str(query or "").strip().split())
     if not text:
-        return "\"\""
+        return _quote_fts_value("")
     tokens = [t for t in re.findall(r"\w+", text, flags=re.UNICODE) if t]
     if not tokens:
         return _build_fts_phrase_query(text)
-    return " AND ".join(f"\"{token.replace('\"', '\"\"')}\"" for token in tokens[:16])
+    return " AND ".join(_quote_fts_value(token) for token in tokens[:16])
 
 
 def _build_fts_phrase_query(query: str) -> str:
     phrase = " ".join(str(query or "").strip().split())
-    return f"\"{phrase.replace('\"', '\"\"')}\""
+    return _quote_fts_value(phrase)
+
+
+def _quote_fts_value(value: str) -> str:
+    escaped = str(value or "").replace('"', '""')
+    return f'"{escaped}"'
 
 
 def _feed_score(item: dict[str, Any], mode: str) -> tuple[float, str, bool]:
