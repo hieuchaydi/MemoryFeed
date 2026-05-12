@@ -213,6 +213,10 @@ Run MCP over streamable HTTP:
 memoryfeed mcp --transport streamable-http --host 127.0.0.1 --port 7748 --path /mcp
 ```
 
+Phase 1 RAG-ready MCP tool:
+- `build_memory_context(query, limit=8, days_back=None, max_context_chars=4000)`
+- Returns bounded prompt-ready `context` + numbered `citations` so agent clients can inject retrieval context directly without custom formatting glue.
+
 ## Manual Setup
 
 Linux/macOS:

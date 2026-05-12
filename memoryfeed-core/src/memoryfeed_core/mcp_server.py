@@ -94,6 +94,50 @@ def _sanitize_untrusted_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _extract_context_text(row: dict[str, Any], max_chars: int = 320) -> str:
+    text = str(row.get("text_excerpt") or row.get("text_content") or "").strip()
+    if not text:
+        return ""
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 3]}..."
+
+
+def _build_rag_context(results: list[dict[str, Any]], max_context_chars: int = 4000) -> tuple[str, list[dict[str, Any]]]:
+    safe_budget = max(500, min(max_context_chars, 16000))
+    lines: list[str] = []
+    citations: list[dict[str, Any]] = []
+
+    for idx, row in enumerate(results, start=1):
+        snippet = _extract_context_text(row)
+        if not snippet:
+            continue
+        platform = str(row.get("platform") or "unknown")
+        captured_at = str(row.get("captured_at") or "")
+        url = str(row.get("url") or "")
+        line = f"[{idx}] ({platform}, {captured_at}) {snippet}"
+        if url:
+            line = f"{line} | source={url}"
+        projected = "\n".join(lines + [line]).strip()
+        if len(projected) > safe_budget:
+            break
+        lines.append(line)
+        citations.append(
+            {
+                "rank": idx,
+                "id": row.get("id"),
+                "platform": platform,
+                "captured_at": captured_at,
+                "url": url,
+            }
+        )
+
+    if not lines:
+        return "No relevant memory context found.", []
+    return "\n".join(lines), citations
+
+
 def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp"):
     if FastMCP is None:
         raise RuntimeError(
@@ -297,6 +341,31 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
             "query": query,
             "count": len(results),
             "results": results,
+            },
+            query=query,
+        )
+
+    @mcp.tool(name="build_memory_context")
+    async def build_memory_context(
+        query: str,
+        limit: int = 8,
+        days_back: int | None = None,
+        max_context_chars: int = 4000,
+    ) -> dict[str, Any]:
+        """
+        RAG-ready memory context with numbered citations for direct LLM prompt injection.
+        """
+        safe_limit = _clamp_mcp_limit(limit, hard_cap=20)
+        results = await searcher.search(query=query, limit=safe_limit, days_back=days_back)
+        context, citations = _build_rag_context(results, max_context_chars=max_context_chars)
+        return _finalize_tool_payload(
+            "build_memory_context",
+            {
+                "query": query,
+                "count": len(citations),
+                "context": context,
+                "citations": citations,
+                "truncated": len(citations) < len(results),
             },
             query=query,
         )

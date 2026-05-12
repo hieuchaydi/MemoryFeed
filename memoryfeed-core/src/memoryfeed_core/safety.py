@@ -96,3 +96,13 @@ def sanitize_untrusted_text(text: str) -> str:
     out = re.sub(r"\bignore\s+(all|previous)\s+instructions\b", "[SANITIZED_INSTRUCTION]", out, flags=re.IGNORECASE)
     out = re.sub(r"\breveal\s+(secrets?|credentials?)\b", "[SANITIZED_SECRET_REQUEST]", out, flags=re.IGNORECASE)
     return out
+
+
+def sanitize_untrusted_payload(value: object) -> object:
+    if isinstance(value, str):
+        return sanitize_untrusted_text(value)
+    if isinstance(value, dict):
+        return {k: sanitize_untrusted_payload(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [sanitize_untrusted_payload(v) for v in value]
+    return value
