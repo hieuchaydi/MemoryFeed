@@ -22,9 +22,9 @@ if (-not (Test-Path -LiteralPath $RepoListFile)) {
   throw "Repo list file not found: $RepoListFile"
 }
 
-$repos = Get-Content -LiteralPath $RepoListFile |
+$repos = @(Get-Content -LiteralPath $RepoListFile |
   ForEach-Object { $_.Trim() } |
-  Where-Object { $_ -and -not $_.StartsWith("#") }
+  Where-Object { $_ -and -not $_.StartsWith("#") })
 
 if ($repos.Count -eq 0) {
   throw "No repos found in $RepoListFile"

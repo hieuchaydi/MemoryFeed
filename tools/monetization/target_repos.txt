@@ -5,6 +5,7 @@ mem0ai/mem0
 run-llama/llama_index
 microsoft/semantic-kernel
 langchain-ai/langchain
+langchain-ai/langgraph
 open-webui/open-webui
 lobehub/lobe-chat
 langgenius/dify
