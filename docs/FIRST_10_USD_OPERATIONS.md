@@ -24,6 +24,9 @@ Two completed orders = `$10`.
 - Continuous loop: `tools/monetization/continuous_until_10usd.ps1`
 - Start loop in background: `tools/monetization/start_continuous_10usd.ps1`
 - Stop loop: `tools/monetization/stop_continuous_10usd.ps1`
+- Watchdog loop: `tools/monetization/watchdog_10usd.ps1`
+- Start watchdog: `tools/monetization/start_watchdog_10usd.ps1`
+- Stop watchdog: `tools/monetization/stop_watchdog_10usd.ps1`
 
 ## Commands
 
@@ -56,6 +59,15 @@ Run continuously in background:
 powershell -ExecutionPolicy Bypass -File tools\monetization\start_continuous_10usd.ps1 `
   -GoalUsd 10 `
   -IntervalMinutes 15
+```
+
+Run watchdog in background:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\monetization\start_watchdog_10usd.ps1 `
+  -GoalUsd 10 `
+  -RunnerIntervalMinutes 10 `
+  -WatchIntervalSeconds 60
 ```
 
 ## Done condition
