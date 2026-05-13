@@ -86,6 +86,7 @@ searcher = Searcher(store, indexer)
 - Docker runbook: `docs/DOCKER_README.md`
 - Research eval suite: `docs/RESEARCH_EVALUATION_SUITE.md`
 - Production roadmap v1.1.0: `docs/ROADMAP_V1_1_0_PRODUCTION.md`
+- MCP RAG integration guide: `docs/MCP_RAG_INTEGRATION.md`
 - Production runbook: `PRODUCTION.md`
 - Monitoring runbook: `MONITORING.md`
 - Backup strategy: `BACKUP_STRATEGY.md`
@@ -213,9 +214,10 @@ Run MCP over streamable HTTP:
 memoryfeed mcp --transport streamable-http --host 127.0.0.1 --port 7748 --path /mcp
 ```
 
-Phase 1 RAG-ready MCP tool:
+RAG-ready MCP tool:
 - `build_memory_context(query, limit=8, days_back=None, max_context_chars=4000)`
 - Returns bounded prompt-ready `context` + numbered `citations` so agent clients can inject retrieval context directly without custom formatting glue.
+- Includes `truncated`, `limit_applied`, `max_context_chars_applied`, and `meta` for traceable truncation/debug behavior.
 
 ## Manual Setup
 
