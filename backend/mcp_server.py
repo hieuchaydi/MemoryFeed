@@ -94,6 +94,86 @@ def _sanitize_untrusted_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _extract_context_text(row: dict[str, Any], max_chars: int = 320) -> str:
+    text = str(row.get("text_excerpt") or row.get("text_content") or "").strip()
+    if not text:
+        return ""
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 3]}..."
+
+
+def _sanitize_context_url(raw_url: Any, max_chars: int = 280) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    compact = " ".join(url.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 3]}..."
+
+
+def _safe_context_budget(max_context_chars: Any) -> int:
+    try:
+        parsed = int(max_context_chars)
+    except (TypeError, ValueError):
+        parsed = 4000
+    return max(500, min(parsed, 16000))
+
+
+def _build_rag_context(
+    results: list[dict[str, Any]],
+    max_context_chars: int = 4000,
+) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
+    safe_budget = _safe_context_budget(max_context_chars)
+    lines: list[str] = []
+    citations: list[dict[str, Any]] = []
+    skipped_empty = 0
+    kept = 0
+    dropped_by_budget = 0
+
+    for source_idx, row in enumerate(results, start=1):
+        snippet = _extract_context_text(row)
+        if not snippet:
+            skipped_empty += 1
+            continue
+        rank = len(citations) + 1
+        platform = str(row.get("platform") or "unknown")
+        captured_at = str(row.get("captured_at") or "")
+        url = _sanitize_context_url(row.get("url"))
+        line = f"[{rank}] ({platform}, {captured_at}) {snippet}"
+        if url:
+            line = f"{line} | source={url}"
+        projected = "\n".join(lines + [line]).strip()
+        if len(projected) > safe_budget:
+            dropped_by_budget += 1
+            break
+        lines.append(line)
+        kept += 1
+        citations.append(
+            {
+                "rank": rank,
+                "source_index": source_idx,
+                "id": row.get("id"),
+                "platform": platform,
+                "captured_at": captured_at,
+                "url": url,
+            }
+        )
+
+    meta = {
+        "requested_results": len(results),
+        "kept_results": kept,
+        "skipped_empty": skipped_empty,
+        "dropped_by_budget": dropped_by_budget,
+        "context_char_budget": safe_budget,
+    }
+    if not lines:
+        return "No relevant memory context found.", [], meta
+    return "\n".join(lines), citations, meta
+
+
 def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp"):
     if FastMCP is None:
         raise RuntimeError(
@@ -297,6 +377,35 @@ def create_server(host: str = "127.0.0.1", port: int = 7748, path: str = "/mcp")
             "query": query,
             "count": len(results),
             "results": results,
+            },
+            query=query,
+        )
+
+    @mcp.tool(name="build_memory_context")
+    async def build_memory_context(
+        query: str,
+        limit: int = 8,
+        days_back: int | None = None,
+        max_context_chars: int = 4000,
+    ) -> dict[str, Any]:
+        """
+        RAG-ready memory context with numbered citations for direct LLM prompt injection.
+        """
+        safe_limit = _clamp_mcp_limit(limit, hard_cap=20)
+        safe_context_chars = _safe_context_budget(max_context_chars)
+        results = await searcher.search(query=query, limit=safe_limit, days_back=days_back)
+        context, citations, meta = _build_rag_context(results, max_context_chars=safe_context_chars)
+        return _finalize_tool_payload(
+            "build_memory_context",
+            {
+                "query": query,
+                "count": len(citations),
+                "context": context,
+                "citations": citations,
+                "truncated": len(citations) < len(results),
+                "limit_applied": safe_limit,
+                "max_context_chars_applied": safe_context_chars,
+                "meta": meta,
             },
             query=query,
         )

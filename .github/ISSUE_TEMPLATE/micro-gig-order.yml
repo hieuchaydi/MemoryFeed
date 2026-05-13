@@ -1,0 +1,54 @@
+name: Micro Gig Order ($5)
+description: Place a small paid task order with same-day turnaround.
+title: "[Order-$5] <task title>"
+labels: ["paid", "micro-gig"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pick one small, concrete task. Keep scope tight to ship fast.
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - $5 Quick Triage
+        - $5 Setup Validation
+        - $5 Docs Cleanup Task
+    validations:
+      required: true
+
+  - type: textarea
+    id: task_details
+    attributes:
+      label: Task details
+      description: Include expected outcome and constraints.
+      placeholder: I need...
+    validations:
+      required: true
+
+  - type: input
+    id: deadline
+    attributes:
+      label: Deadline
+      placeholder: e.g. within 6 hours
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What counts as done?
+      placeholder: Done when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: contact
+    attributes:
+      label: Contact
+      placeholder: GitHub handle + best time
+    validations:
+      required: true

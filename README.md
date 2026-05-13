@@ -86,9 +86,31 @@ searcher = Searcher(store, indexer)
 - Docker runbook: `docs/DOCKER_README.md`
 - Research eval suite: `docs/RESEARCH_EVALUATION_SUITE.md`
 - Production roadmap v1.1.0: `docs/ROADMAP_V1_1_0_PRODUCTION.md`
+- MCP RAG integration guide: `docs/MCP_RAG_INTEGRATION.md`
 - Production runbook: `PRODUCTION.md`
 - Monitoring runbook: `MONITORING.md`
 - Backup strategy: `BACKUP_STRATEGY.md`
+- Revenue playbook: `docs/REVENUE_PLAYBOOK.md`
+- Outreach templates: `docs/OUTREACH_TEMPLATES.md`
+- First $15 plan: `docs/FIRST_15_USD_PLAN.md`
+- Money execution + withdrawal runbook (VI): `docs/MONEY_EXECUTION_AND_WITHDRAWAL.md`
+- First $10 operations runbook: `docs/FIRST_10_USD_OPERATIONS.md`
+- Daily selling loop (VI): `docs/DAILY_SELLING_LOOP.md`
+- Direct-sales $20 kit (VI): `docs/DIRECT_SALES_20USD_KIT.md`
+
+## Work With MemoryFeed
+
+Need a paid integration, custom deployment, or focused feature sprint?
+
+- Open a request: `Issues -> New issue -> Paid Integration Request`
+- Or open a direct offer issue with your scope, timeline, and budget.
+- Typical starter options:
+  - `$10`: debug triage package (diagnosis + fix path + acceptance checklist)
+  - `$10`: setup/integration mini package (runbook + patch scope)
+  - `$25`: setup/debug session with deeper actionable patch plan
+  - `$75+`: scoped implementation sprint in this repo
+
+Sponsor links can be enabled via `.github/FUNDING.yml`.
 
 ## Requirements
 
@@ -191,6 +213,11 @@ Run MCP over streamable HTTP:
 ```bash
 memoryfeed mcp --transport streamable-http --host 127.0.0.1 --port 7748 --path /mcp
 ```
+
+RAG-ready MCP tool:
+- `build_memory_context(query, limit=8, days_back=None, max_context_chars=4000)`
+- Returns bounded prompt-ready `context` + numbered `citations` so agent clients can inject retrieval context directly without custom formatting glue.
+- Includes `truncated`, `limit_applied`, `max_context_chars_applied`, and `meta` for traceable truncation/debug behavior.
 
 ## Manual Setup
 

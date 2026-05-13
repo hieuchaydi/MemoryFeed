@@ -29,3 +29,6 @@ docs-react/dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Monetization runtime logs
+tools/monetization/*.log

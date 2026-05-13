@@ -1,0 +1,32 @@
+# Replace this list with your validated targets.
+# Keep only repos where maintainers welcome collaboration requests.
+
+mem0ai/mem0
+run-llama/llama_index
+microsoft/semantic-kernel
+langchain-ai/langchain
+langchain-ai/langgraph
+open-webui/open-webui
+lobehub/lobe-chat
+langgenius/dify
+crewAIInc/crewAI
+All-Hands-AI/OpenHands
+microsoft/autogen
+ContinueDev/continue
+browser-use/browser-use
+BerriAI/litellm
+comfyanonymous/ComfyUI
+getzep/graphiti
+microsoft/markitdown
+infiniflow/ragflow
+letta-ai/letta
+microsoft/promptflow
+modelcontextprotocol/servers
+microsoft/graphrag
+openai/openai-agents-python
+fixie-ai/ultravox
+chroma-core/chroma
+qdrant/qdrant
+weaviate/weaviate
+deepset-ai/haystack
+Mintplex-Labs/anything-llm
